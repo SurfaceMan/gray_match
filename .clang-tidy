@@ -1,0 +1,30 @@
+Checks: '-*,bugprone-*,clang-*,cppcoreguidelines-*,hicpp-avoid-goto,hicpp-braces-around-statements,hicpp-deprecated-headers,hicpp-exception-baseclass,hicpp-explicit-conversions,hicpp-function-size,hicpp-invalid-access-moved,hicpp-member-init,hicpp-move-const-arg,hicpp-multiway-paths-covered,hicpp-named-parameter,hicpp-new-delete-operators,hicpp-no-*,hicpp-noexcept-move,hicpp-signed-bitwise,hicpp-special-member-functions,hicpp-static-assert,hicpp-undelegated-constructor,hicpp-uppercase-literal-suffix,hicpp-use-*,hicpp-vararg,misc-*,modernize-avoid-*,modernize-concat-nested-namespaces,modernize-deprecated-*,modernize-loop-convert,modernize-macro-to-enum,modernize-make-*,modernize-pass-by-value,modernize-raw-string-literal,modernize-redundant-void-arg,modernize-replace-*,modernize-return-braced-init-list,modernize-shrink-to-fit,modernize-unary-static-assert,modernize-use-auto,modernize-use-bool-literals,modernize-use-default-member-init,modernize-use-emplace,modernize-use-equals-*,modernize-use-nodiscard,modernize-use-noexcept,modernize-use-nullptr,modernize-use-override,modernize-use-transparent-functors,modernize-use-uncaught-exceptions,modernize-use-using,openmp-*,performance-*,readability-*'
+#WarningAsErrors: ''
+HeaderFilterRegex: ''
+AnalyzeTemporaryDtors: false
+FormatStyle: none
+CheckOptions:
+  - key: readability-identifier-naming.VariableCase
+    value: camelBack
+  - key: readability-identifier-naming.MacroDefinitionCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.EnumCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.EnumConstantCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.GlobalVariableCase
+    value: camelBack
+  - key: readability-identifier-naming.GlobalVariablePrefix
+    value: g
+  - key: readability-identifier-naming.MemberCase
+    value: CamelCase
+  - key: readability-identifier-naming.MemberPrefix
+    value: m
+  - key: readability-identifier-naming.ClassMemberCase
+    value: CamelCase
+  - key: readability-identifier-naming.ClassMemberPrefix
+    value: m
+  - key: readability-identifier-naming.ClassCase
+    value: CamelCase 
+  - key: readability-identifier-naming.StructCase
+    value: CamelCase  
