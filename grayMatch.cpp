@@ -1,5 +1,7 @@
 #include "grayMatch.h"
 
+#include <opencv2/core/hal/intrin.hpp>
+
 const int    MIN_AREA  = 256;
 const double TOLERANCE = 0.0000001;
 const int    CANDIDATE = 5;
@@ -219,8 +221,8 @@ cv::Size computeRotationSize(const cv::Size &dstSize, const cv::Size &templateSi
 
     cv::Size size(halfWidth * 2, halfHeight * 2);
     auto     wrongSize = (templateSize.width < size.width && templateSize.height > size.height) ||
-                     (templateSize.width > size.width && templateSize.height < size.height ||
-                      templateSize.area() > size.area());
+                      (templateSize.width > size.width && templateSize.height < size.height) ||
+                      templateSize.area() > size.area();
     if (wrongSize) {
         size = {int(max.x - min.x + 0.5), int(max.y - min.y + 0.5)};
     }
@@ -228,7 +230,7 @@ cv::Size computeRotationSize(const cv::Size &dstSize, const cv::Size &templateSi
     return size;
 }
 
-void coeffDenominator(cv::Mat &src, cv::Size &templateSize, cv::Mat &result, double mean,
+void coeffDenominator(const cv::Mat &src, const cv::Size &templateSize, cv::Mat &result, double mean,
                       double normal, double invArea, bool equal1) {
     if (equal1) {
         result = cv::Scalar::all(1);
@@ -281,13 +283,41 @@ void coeffDenominator(cv::Mat &src, cv::Size &templateSize, cv::Mat &result, dou
     }
 }
 
+float convSimd(uchar* kernel, uchar* src, int kernelWidth){
+    auto blockSize = cv::VTraits<cv::v_uint8>::vlanes();
+    auto vSum = cv::vx_setall_u32(0) ;
+    int i = 0;
+    for(; i < kernelWidth - blockSize; i += blockSize){
+      vSum += cv::v_dotprod_expand(cv::v_load(kernel+i), cv::v_load(src+i));
+    }
+    auto sum = cv::v_reduce_sum(vSum);
+
+    for(;i<kernelWidth; i++){
+        sum += kernel[i]*src[i];
+    }
+
+    return (float)sum;
+}
+
 void matchTemplateSimd(cv::Mat &src, cv::Mat &templateImg, cv::Mat &result) {
-    return;
+    result = cv::Mat::zeros(src.size() - templateImg.size() + cv::Size(1, 1), CV_32FC1);
+
+    for(int y = 0; y < src.rows; y++){
+        auto *resultPtr = result.ptr<float>(y);
+        for(int x = 0; x < src.cols; x++){
+            auto &score = resultPtr[x];
+            for(int templateRow = 0; templateRow < templateImg.rows; templateRow++){
+                auto* srcPtr = src.ptr<uchar>(y + templateRow) + x;
+                auto* temPtr = templateImg.ptr<uchar>(templateRow);
+                score += convSimd(temPtr, srcPtr, templateImg.cols);
+            }
+        }
+    }
 }
 
 void matchTemplate(cv::Mat &src, cv::Mat &result, Model *model, int level) {
 #ifdef CV_SIMD
-    matchTemplateSimd(src, , result);
+    matchTemplateSimd(src, model->pyramids[ level ], result);
 #else
     cv::matchTemplate(src, model->pyramids[ level ], result, cv::TM_CCORR);
 #endif
@@ -355,14 +385,14 @@ void cropRotatedRoi(const cv::Mat &src, const cv::Size &templateSize, cv::Point2
 void filterOverlap(std::vector<Candidate> &candidates, std::vector<cv::RotatedRect> &rects,
                    double maxOverlap) {
     auto size = candidates.size();
-    for (int i = 0; i < size; i++) {
+    for (std::size_t i = 0; i < size; i++) {
         auto &candidate = candidates[ i ];
         auto &rect      = rects[ i ];
         if (candidate.score < 0) {
             continue;
         }
 
-        for (int j = i + 1; j < size; j++) {
+        for (std::size_t j = i + 1; j < size; j++) {
             auto &refCandidate = candidates[ j ];
             auto &refRect      = rects[ j ];
             if (refCandidate.score < 0) {
@@ -449,99 +479,94 @@ Model *trainModel(const cv::Mat &src, int level) {
 std::vector<Pose> matchModel(const cv::Mat &dst, Model *model, int level, double startAngle,
                              double spanAngle, double maxOverlap, double minScore, int maxCount,
                              int subpixel) {
-    if (dst.empty() || nullptr == model) {
-        return {};
-    }
+    //prepare
+    {
+        if (dst.empty() || nullptr == model) {
+            return {};
+        }
 
-    auto &templateImg = model->pyramids.front();
-    if (dst.cols < templateImg.cols || dst.rows < templateImg.rows ||
-        dst.size().area() < templateImg.size().area()) {
-        return {};
-    }
+        auto &templateImg = model->pyramids.front();
+        if (dst.cols < templateImg.cols || dst.rows < templateImg.rows ||
+                dst.size().area() < templateImg.size().area()) {
+            return {};
+        }
 
-    if (level < 0 || level > model->pyramids.size() - 1) {
-        // level must grater than 1
-        level = model->pyramids.size() - 1;
+        auto templateLevel = static_cast<int>(model->pyramids.size() - 1);
+        if (level < 0 || level > templateLevel) {
+            // level must grater than 1
+            level = templateLevel;
+        }
     }
 
     std::vector<cv::Mat> pyramids;
     cv::buildPyramid(dst, pyramids, level);
 
     // compute top
-    const auto &templateTop = model->pyramids[ level ];
-    auto        angleStep = atan(2. / std::max(templateTop.cols, templateTop.rows)) * 180. / CV_PI;
-
-    const auto &dstTop = pyramids.back();
-    cv::Point2d center = sizeCenter(dstTop.size());
-    bool calMaxByBlock = (dstTop.size().area() / templateTop.size().area() > 500) && maxCount > 10;
-    const auto topScoreThreshold = minScore * pow(0.9, level);
-
     std::vector<Candidate> candidates;
+    {
+        const auto &templateTop = model->pyramids[ level ];
+        auto        angleStep = atan(2. / std::max(templateTop.cols, templateTop.rows)) * 180. / CV_PI;
 
-    // std::vector<double> angles;
-    // for (double angle = 0; angle < 180. + angleStep; angle += angleStep) {
-    //     angles.push_back(angle);
-    // }
-    // for (double angle = -angleStep; angle > -180. - angleStep; angle -= angleStep) {
-    //     angles.push_back(angle);
-    // }
+        const auto &dstTop = pyramids.back();
+        cv::Point2d center = sizeCenter(dstTop.size());
+        bool calMaxByBlock = (dstTop.size().area() / templateTop.size().area() > 500) && maxCount > 10;
+        const auto topScoreThreshold = minScore * pow(0.9, level);
 
-    for (auto angle = startAngle; angle < startAngle + spanAngle + angleStep; angle += angleStep) {
-        // for (auto angle : angles) {
+        for (auto angle = startAngle; angle < startAngle + spanAngle + angleStep; angle += angleStep) {
+            auto rotate = cv::getRotationMatrix2D(center, angle, 1.);
+            auto size   = computeRotationSize(dstTop.size(), templateTop.size(), angle, rotate);
 
-        auto rotate = cv::getRotationMatrix2D(center, angle, 1.);
-        auto size   = computeRotationSize(dstTop.size(), templateTop.size(), angle, rotate);
+            auto tx                  = (size.width - 1) / 2. - center.x;
+            auto ty                  = (size.height - 1) / 2. - center.y;
+            rotate.at<double>(0, 2) += tx;
+            rotate.at<double>(1, 2) += ty;
+            cv::Point2d offset(tx, ty);
 
-        auto tx                  = (size.width - 1) / 2. - center.x;
-        auto ty                  = (size.height - 1) / 2. - center.y;
-        rotate.at<double>(0, 2) += tx;
-        rotate.at<double>(1, 2) += ty;
-        cv::Point2d offset(tx, ty);
+            cv::Mat rotated;
+            cv::warpAffine(dstTop, rotated, rotate, size, cv::INTER_LINEAR, cv::BORDER_CONSTANT,
+                           model->borderColor);
 
-        cv::Mat rotated;
-        cv::warpAffine(dstTop, rotated, rotate, size, cv::INTER_LINEAR, cv::BORDER_CONSTANT,
-                       model->borderColor);
-
-        cv::Mat result;
-        matchTemplate(rotated, result, model, level);
-        if (calMaxByBlock) {
-            BlockMax  block(result, templateTop.size());
-            double    maxScore;
-            cv::Point maxPos;
-            block.maxValueLoc(maxScore, maxPos);
-            if (maxScore < topScoreThreshold) {
-                continue;
-            }
-
-            candidates.emplace_back(cv::Point2d(maxPos) - offset, angle, maxScore);
-            for (int j = 0; j < maxCount + CANDIDATE - 1; j++) {
-                nextMaxLoc(maxPos, templateTop.size(), maxOverlap, block, maxScore, maxPos);
+            cv::Mat result;
+            matchTemplate(rotated, result, model, level);
+            if (calMaxByBlock) {
+                BlockMax  block(result, templateTop.size());
+                double    maxScore;
+                cv::Point maxPos;
+                block.maxValueLoc(maxScore, maxPos);
                 if (maxScore < topScoreThreshold) {
-                    break;
+                    continue;
                 }
 
                 candidates.emplace_back(cv::Point2d(maxPos) - offset, angle, maxScore);
-            }
-        } else {
-            double    maxScore;
-            cv::Point maxPos;
-            cv::minMaxLoc(result, 0, &maxScore, 0, &maxPos);
-            if (maxScore < topScoreThreshold) {
-                continue;
-            }
+                for (int j = 0; j < maxCount + CANDIDATE - 1; j++) {
+                    nextMaxLoc(maxPos, templateTop.size(), maxOverlap, block, maxScore, maxPos);
+                    if (maxScore < topScoreThreshold) {
+                        break;
+                    }
 
-            candidates.emplace_back(cv::Point2d(maxPos) - offset, angle, maxScore);
-            for (int j = 0; j < maxCount + CANDIDATE - 1; j++) {
-                nextMaxLoc(result, maxPos, templateTop.size(), maxOverlap, maxScore, maxPos);
+                    candidates.emplace_back(cv::Point2d(maxPos) - offset, angle, maxScore);
+                }
+            } else {
+                double    maxScore;
+                cv::Point maxPos;
+                cv::minMaxLoc(result, 0, &maxScore, 0, &maxPos);
                 if (maxScore < topScoreThreshold) {
-                    break;
+                    continue;
                 }
 
                 candidates.emplace_back(cv::Point2d(maxPos) - offset, angle, maxScore);
+                for (int j = 0; j < maxCount + CANDIDATE - 1; j++) {
+                    nextMaxLoc(result, maxPos, templateTop.size(), maxOverlap, maxScore, maxPos);
+                    if (maxScore < topScoreThreshold) {
+                        break;
+                    }
+
+                    candidates.emplace_back(cv::Point2d(maxPos) - offset, angle, maxScore);
+                }
             }
         }
+        std::sort(candidates.begin(), candidates.end());
     }
-    std::sort(candidates.begin(), candidates.end());
 
     // match candidate each level
     std::vector<Candidate> levelMatched;
@@ -624,39 +649,43 @@ std::vector<Pose> matchModel(const cv::Mat &dst, Model *model, int level, double
 
     // filter overlap
     std::vector<cv::RotatedRect> rects;
-    rects.reserve(levelMatched.size());
-    auto        size = model->pyramids.front().size();
-    cv::Point2f topRight(size.width, 0.f);
-    cv::Point2f bottomRight(size.width, size.height);
-    for (const auto &candidate : levelMatched) {
-        std::vector<cv::Point2f> points{topRight + cv::Point2f(candidate.pos),
-                                        bottomRight + cv::Point2f(candidate.pos)};
-        auto rotate = cv::getRotationMatrix2D(candidate.pos, -candidate.angle, 1.);
-        std::vector<cv::Point2f> rotatedPoints;
-        cv::transform(points, rotatedPoints, rotate);
+    {
+        rects.reserve(levelMatched.size());
+        auto        size = model->pyramids.front().size();
+        cv::Point2f topRight((float)size.width, 0.f);
+        cv::Point2f bottomRight((float)size.width, (float)size.height);
+        for (const auto &candidate : levelMatched) {
+            std::vector<cv::Point2f> points{topRight + cv::Point2f(candidate.pos),
+                        bottomRight + cv::Point2f(candidate.pos)};
+            auto rotate = cv::getRotationMatrix2D(candidate.pos, -candidate.angle, 1.);
+            std::vector<cv::Point2f> rotatedPoints;
+            cv::transform(points, rotatedPoints, rotate);
 
-        rects.emplace_back(
-            cv::RotatedRect{cv::Point2f(candidate.pos), rotatedPoints[ 0 ], rotatedPoints[ 1 ]});
+            rects.emplace_back(
+                        cv::RotatedRect{cv::Point2f(candidate.pos), rotatedPoints[ 0 ], rotatedPoints[ 1 ]});
+        }
+        filterOverlap(levelMatched, rects, maxOverlap);
     }
-    filterOverlap(levelMatched, rects, maxOverlap);
 
     std::vector<Pose> result;
-    auto              count = levelMatched.size();
-    for (int i = 0; i < count; i++) {
-        auto &candidate = levelMatched[ i ];
-        auto &rect      = rects[ i ];
+    {
+        auto count = levelMatched.size();
+        for (std::size_t i = 0; i < count; i++) {
+            auto &candidate = levelMatched[ i ];
+            auto &rect      = rects[ i ];
 
-        if (candidate.score < 0) {
-            continue;
+            if (candidate.score < 0) {
+                continue;
+            }
+
+            auto center = rect.center;
+            result.emplace_back(
+                        Pose{center.x, center.y, (float)-candidate.angle, (float)candidate.score});
         }
 
-        auto center = rect.center;
-        result.emplace_back(
-            Pose{center.x, center.y, (float)-candidate.angle, (float)candidate.score});
+        std::sort(result.begin(), result.end(),
+                  [](const Pose &a, const Pose &b) { return a.score > b.score; });
     }
-
-    std::sort(result.begin(), result.end(),
-              [](const Pose &a, const Pose &b) { return a.score > b.score; });
 
     return result;
 }
