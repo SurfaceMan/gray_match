@@ -117,7 +117,8 @@ struct BlockMax {
             }
 
             // update
-            cv::minMaxLoc(score(block.rect), 0, &block.maxScore, 0, 0);
+            cv::minMaxLoc(score(block.rect), 0, &block.maxScore, 0, &block.maxPos);
+            block.maxPos += block.rect.tl();
         }
     }
 
@@ -463,11 +464,7 @@ Model *trainModel(const cv::Mat &src, int level) {
         auto stdNormal = stdDev[ 0 ] * stdDev[ 0 ] + stdDev[ 1 ] * stdDev[ 1 ] +
                          stdDev[ 2 ] * stdDev[ 2 ] + stdDev[ 3 ] * stdDev[ 3 ];
         auto equal1 = stdNormal < std::numeric_limits<double>::epsilon();
-
-        auto normal2 = stdNormal + mean[ 0 ] * mean[ 0 ] + mean[ 1 ] * mean[ 1 ] +
-                       mean[ 2 ] * mean[ 2 ] + mean[ 3 ] * mean[ 3 ];
-        normal2     /= invArea;
-        auto normal  = sqrt(stdNormal) / sqrt(invArea);
+        auto normal = sqrt(stdNormal) / sqrt(invArea);
 
         model.equal1.push_back(equal1);
         model.invArea.push_back(invArea);
@@ -625,7 +622,7 @@ std::vector<Pose> matchModel(const cv::Mat &dst, Model *model, int level, double
                 break;
             }
 
-            if (!newScoreRect.empty() && subpixel) {
+            if (subpixel && 0 == currentLevel && !newScoreRect.empty()) {
                 // TODO subpixel
             }
 
