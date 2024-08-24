@@ -7,10 +7,17 @@ int main() {
     auto src =
         cv::imread("/home/abc/project/ShapeMatch/ShapeMatchTest/TestImage/3.bmp", cv::IMREAD_GRAYSCALE);
     auto dst =
-        cv::imread("/home/abc/project/ShapeMatch/ShapeMatchTest/TestImage/l.bmp", cv::IMREAD_GRAYSCALE);
+        cv::imread("/home/abc/project/ShapeMatch/ShapeMatchTest/TestImage/j.bmp", cv::IMREAD_GRAYSCALE);
 
+    auto t0 = cv::getTickCount();
     auto model = trainModel(src, -1);
-    auto poses = matchModel(dst, model, 3, 0, 360, 0, 0.5, 70, 1);
+    auto t1 = cv::getTickCount();
+    auto poses = matchModel(dst, model, -1, 0, 360, 0, 0.5, 70, 1);
+    auto t2 = cv::getTickCount();
+
+    auto trainCost = double(t1 - t0) / cv::getTickFrequency();
+    auto matchCost = double(t2 - t1) / cv::getTickFrequency();
+    std::cout << "train(s):" << trainCost << " match(s):" << matchCost <<std::endl;
 
     cv::Mat color;
     cv::cvtColor(dst, color, cv::COLOR_GRAY2RGB);

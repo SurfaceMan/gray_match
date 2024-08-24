@@ -283,7 +283,8 @@ void coeffDenominator(const cv::Mat &src, const cv::Size &templateSize, cv::Mat 
     }
 }
 
-float convSimd(uchar* kernel, uchar* src, int kernelWidth){
+#ifdef CV_SIMD
+float convSimd(const uchar* kernel, const uchar* src, int kernelWidth){
     auto blockSize = cv::VTraits<cv::v_uint8>::vlanes();
     auto vSum = cv::vx_setall_u32(0) ;
     int i = 0;
@@ -299,12 +300,12 @@ float convSimd(uchar* kernel, uchar* src, int kernelWidth){
     return (float)sum;
 }
 
-void matchTemplateSimd(cv::Mat &src, cv::Mat &templateImg, cv::Mat &result) {
+void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &result) {
     result = cv::Mat::zeros(src.size() - templateImg.size() + cv::Size(1, 1), CV_32FC1);
 
-    for(int y = 0; y < src.rows; y++){
+    for(int y = 0; y < result.rows; y++){
         auto *resultPtr = result.ptr<float>(y);
-        for(int x = 0; x < src.cols; x++){
+        for(int x = 0; x < result.cols; x++){
             auto &score = resultPtr[x];
             for(int templateRow = 0; templateRow < templateImg.rows; templateRow++){
                 auto* srcPtr = src.ptr<uchar>(y + templateRow) + x;
@@ -314,6 +315,7 @@ void matchTemplateSimd(cv::Mat &src, cv::Mat &templateImg, cv::Mat &result) {
         }
     }
 }
+#endif
 
 void matchTemplate(cv::Mat &src, cv::Mat &result, Model *model, int level) {
 #ifdef CV_SIMD
