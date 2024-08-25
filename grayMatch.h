@@ -12,7 +12,8 @@ struct Pose {
     float score;
 };
 
-Model *trainModel(const cv::Mat &src, int level);
+Model *trainModel(const cv::Mat &src, int level, double startAngle, double spanAngle,
+                  double anglgStep);
 
 std::vector<Pose> matchModel(const cv::Mat &dst, const Model *model, int level, double startAngle,
                              double spanAngle, double maxOverlap, double minScore, int maxCount,

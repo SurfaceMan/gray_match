@@ -157,6 +157,33 @@ struct Candidate {
     }
 };
 
+inline cv::Point2d transform(const cv::Point2d &point, const cv::Mat &rotate) {
+    const auto ptr = rotate.ptr<double>();
+
+    auto x = point.x * ptr[ 0 ] + point.y * ptr[ 1 ] + ptr[ 2 ];
+    auto y = point.x * ptr[ 3 ] + point.y * ptr[ 4 ] + ptr[ 5 ];
+
+    return {x, y};
+}
+
+inline cv::Point2d transform(const cv::Point2d &point, const cv::Point &center, double angle) {
+    const auto rotate = cv::getRotationMatrix2D(center, angle, 1.);
+
+    return transform(point, rotate);
+}
+
+inline cv::Point2d sizeCenter(const cv::Size &size) {
+    return {(size.width - 1.) / 2., (size.height - 1.) / 2.};
+}
+
+inline cv::Point2d sizeCenter(const cv::Size2d &size) {
+    return {(size.width - 1.) / 2., (size.height - 1.) / 2.};
+}
+
+inline double sizeAngleStep(const cv::Size &size) {
+    return atan(2. / std::max(size.width, size.height)) * 180. / CV_PI;
+}
+
 int computeLayers(const int width, const int height, const int minArea) {
     assert(width > 0 && height > 0 && minArea > 0);
 
@@ -168,6 +195,32 @@ int computeLayers(const int width, const int height, const int minArea) {
     }
 
     return layer;
+}
+
+cv::Rect2d boundingRect(const std::vector<cv::Point2d> &points) {
+    if (points.empty()) {
+        return {};
+    }
+
+    cv::Point2d min = points[ 0 ];
+    cv::Point2d max = points[ 0 ];
+    for (const auto &point : points) {
+        if (point.x < min.x) {
+            min.x = point.x;
+        }
+        if (point.y < min.y) {
+            min.y = point.y;
+        }
+
+        if (point.x > max.x) {
+            max.x = point.x;
+        }
+        if (point.y > max.y) {
+            max.y = point.y;
+        }
+    }
+
+    return {min, max};
 }
 
 cv::Size computeRotationSize(const cv::Size &dstSize, const cv::Size &templateSize, double angle,
@@ -193,24 +246,9 @@ cv::Size computeRotationSize(const cv::Size &dstSize, const cv::Size &templateSi
         {static_cast<double>(dstSize.width) - 1, static_cast<double>(dstSize.height) - 1}};
     std::vector<cv::Point2d> trans;
     cv::transform(points, trans, rotate);
-
-    cv::Point2d min = trans[ 0 ];
-    cv::Point2d max = trans[ 0 ];
-    for (const auto &point : trans) {
-        if (point.x < min.x) {
-            min.x = point.x;
-        }
-        if (point.y < min.y) {
-            min.y = point.y;
-        }
-
-        if (point.x > max.x) {
-            max.x = point.x;
-        }
-        if (point.y > max.y) {
-            max.y = point.y;
-        }
-    }
+    auto rect = boundingRect(trans);
+    auto max  = rect.br();
+    auto min  = rect.tl();
 
     if (angle > 0 && angle < 90) {
         ;
@@ -228,7 +266,7 @@ cv::Size computeRotationSize(const cv::Size &dstSize, const cv::Size &templateSi
     const auto width  = templateSize.width * dx * dy;
     const auto height = templateSize.height * dx * dy;
 
-    const auto center     = cv::Point2d((dstSize.width - 1.) / 2., (dstSize.height - 1.) / 2.);
+    const auto center     = sizeCenter(dstSize);
     const auto halfHeight = static_cast<int>(ceil(max.y - center.y - width));
     const auto halfWidth  = static_cast<int>(ceil(max.x - center.x - height));
 
@@ -372,25 +410,6 @@ void nextMaxLoc(cv::Mat &score, const cv::Point &pos, const cv::Size templateSiz
     cv::minMaxLoc(score, nullptr, &maxScore, nullptr, &maxPos);
 }
 
-inline cv::Point2d transform(const cv::Point2d &point, const cv::Mat &rotate) {
-    const auto ptr = rotate.ptr<double>();
-
-    auto x = point.x * ptr[ 0 ] + point.y * ptr[ 1 ] + ptr[ 2 ];
-    auto y = point.x * ptr[ 3 ] + point.y * ptr[ 4 ] + ptr[ 5 ];
-
-    return {x, y};
-}
-
-inline cv::Point2d transform(const cv::Point2d &point, const cv::Point &center, double angle) {
-    const auto rotate = cv::getRotationMatrix2D(center, angle, 1.);
-
-    return transform(point, rotate);
-}
-
-inline cv::Point2d sizeCenter(const cv::Size &size) {
-    return {(size.width - 1.) / 2., (size.height - 1.) / 2.};
-}
-
 void cropRotatedRoi(const cv::Mat &src, const cv::Size &templateSize, const cv::Point2d topLeft,
                     const cv::Mat &rotate, cv::Mat &roi) {
     const auto     point = transform(topLeft, rotate);
@@ -449,7 +468,10 @@ void filterOverlap(std::vector<Candidate> &candidates, const std::vector<cv::Rot
     }
 }
 
-Model *trainModel(const cv::Mat &src, int level) {
+Model *trainModel(const cv::Mat &src, int level, double startAngle, double spanAngle,
+                  double anglgStep) {
+    (void)(anglgStep);
+
     if (src.empty() || src.channels() != 1) {
         return nullptr;
     }
@@ -473,7 +495,8 @@ Model *trainModel(const cv::Mat &src, int level) {
     model.reserve(model.pyramids.size());
 
     for (const auto &pyramid : model.pyramids) {
-        auto invArea = 1. / pyramid.size().area();
+        const auto area    = pyramid.size().area();
+        auto       invArea = 1. / area;
 
         cv::Scalar mean;
         cv::Scalar stdDev;
@@ -484,6 +507,43 @@ Model *trainModel(const cv::Mat &src, int level) {
         auto equal1 = stdNormal < std::numeric_limits<double>::epsilon();
         auto normal = sqrt(stdNormal) / sqrt(invArea);
 
+        auto                     currentAngleStep = sizeAngleStep(pyramid.size());
+        auto                     center           = sizeCenter(pyramid.size());
+        const auto               count = static_cast<int>(spanAngle / currentAngleStep) + 1;
+        std::vector<cv::Point2d> points{{0., 0.},
+                                        {pyramid.cols - 1., 0.},
+                                        {pyramid.cols - 1., pyramid.rows - 1.},
+                                        {0., pyramid.rows - 1.}};
+        for (int i = 0; i < count; i++) {
+            auto angle  = startAngle + currentAngleStep * i;
+            auto rotate = cv::getRotationMatrix2D(center, angle, 1.0);
+
+            std::vector<cv::Point2d> trans;
+            cv::transform(points, trans, rotate);
+            auto rect = boundingRect(trans);
+
+            auto center2             = sizeCenter(rect.size());
+            auto offset              = center2 - center;
+            rotate.at<double>(0, 2) += offset.x;
+            rotate.at<double>(1, 2) += offset.y;
+
+            cv::Mat rotated;
+            cv::warpAffine(pyramid, rotated, rotate, rect.size(), cv::INTER_LINEAR,
+                           cv::BORDER_DEFAULT, cv::Scalar(model.borderColor));
+
+            // if background area less than 1 percent, just match rotated image
+            auto rate = static_cast<double>(area) / rotated.size().area();
+            if (rate > 0.9) {
+                continue;
+            }
+
+            // draw rotated rect line, then encode with run-length-encode
+
+            if (rotated.empty()) {
+                continue;
+            }
+        }
+
         model.equal1.push_back(equal1);
         model.invArea.push_back(invArea);
         model.mean.push_back(mean);
@@ -491,10 +551,6 @@ Model *trainModel(const cv::Mat &src, int level) {
     }
 
     return result;
-}
-
-inline double sizeAngleStep(const cv::Size &size) {
-    return atan(2. / std::max(size.width, size.height)) * 180. / CV_PI;
 }
 
 std::vector<Candidate> matchTopLevel(const cv::Mat &dstTop, double startAngle, double spanAngle,

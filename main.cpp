@@ -7,21 +7,21 @@ int main() {
     auto src =
         cv::imread("C:/Users/qiuyong/Desktop/test/template/model3.bmp", cv::IMREAD_GRAYSCALE);
     auto dst =
-        cv::imread("C:/Users/qiuyong/Desktop/test/template/model3_src1.bmp", cv::IMREAD_GRAYSCALE);
+        cv::imread("C:/Users/qiuyong/Desktop/test/template/model3_src2.bmp", cv::IMREAD_GRAYSCALE);
 
     auto t0    = cv::getTickCount();
-    auto model = trainModel(src, -1);
+    auto model = trainModel(src, -1, 0, 360, -1);
     auto t1    = cv::getTickCount();
     auto poses = matchModel(dst, model, -1, 0, 360, 0, 0.5, 70, 1);
     auto t2    = cv::getTickCount();
 
-    auto trainCost = double(t1 - t0) / cv::getTickFrequency();
-    auto matchCost = double(t2 - t1) / cv::getTickFrequency();
+    const auto trainCost = static_cast<double>(t1 - t0) / cv::getTickFrequency();
+    const auto matchCost = static_cast<double>(t2 - t1) / cv::getTickFrequency();
     std::cout << "train(s):" << trainCost << " match(s):" << matchCost << std::endl;
 
     cv::Mat color;
     cv::cvtColor(dst, color, cv::COLOR_GRAY2RGB);
-    for (auto &pose : poses) {
+    for (const auto &pose : poses) {
         cv::RotatedRect rect(cv::Point2f(pose.x, pose.y), src.size(), -pose.angle);
 
         std::vector<cv::Point2f> pts;
