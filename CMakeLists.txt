@@ -12,6 +12,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE ${OpenCV_INCLUDE_DIRS})
 target_link_libraries(${PROJECT_NAME} ${OpenCV_LIBRARIES})
 target_compile_options(${PROJECT_NAME} PRIVATE
         $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX /external:W0>
-        $<$<STREQUAL:${CMAKE_SYSTEM_NAME},Linux>:-fPIC -fvisibility=hidden -Wall -Wextra -Wpedantic -Wmisleading-indentation -Wunused -Wuninitialized -Wshadow -Wconversion -Werror>
+        $<$<STREQUAL:${CMAKE_SYSTEM_NAME},Linux>: -mlsx -fPIC -fvisibility=hidden -Wall -Wextra -Wpedantic -Wmisleading-indentation -Wunused -Wuninitialized -Wshadow -Wconversion -Werror>
         $<$<AND:$<CXX_COMPILER_ID:Clang>,$<STREQUAL:${CMAKE_SYSTEM_NAME},Windows>>:/W4 /WX /external:W0>
 )
+target_compile_definitions(${PROJECT_NAME} PUBLIC -DCV_LSX=1)
