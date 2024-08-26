@@ -157,6 +157,38 @@ struct Candidate {
     }
 };
 
+struct RLE {
+    int row         = -1;
+    int startColumn = -1;
+    int length      = 0;
+};
+
+using Region = std::vector<RLE>;
+
+struct Template {
+    cv::Mat     img;
+    Region      region;
+    cv::Point2d center;
+    double      angle = 0;
+};
+
+struct Layer {
+    double angleStep = 0;
+    double mean      = 0;
+    double normal    = 0;
+    double invArea   = 0;
+
+    std::vector<Template> templates;
+};
+
+struct Model2 {
+    double startAngle = 0;
+    double stopAngle  = 0;
+    double angleStep  = 0;
+
+    std::vector<Layer> layers;
+};
+
 inline cv::Point2d transform(const cv::Point2d &point, const cv::Mat &rotate) {
     const auto ptr = rotate.ptr<double>();
 
@@ -181,7 +213,8 @@ inline cv::Point2d sizeCenter(const cv::Size2d &size) {
 }
 
 inline double sizeAngleStep(const cv::Size &size) {
-    return atan(2. / std::max(size.width, size.height)) * 180. / CV_PI;
+    const auto diameter = sqrt(size.width * size.width + size.height * size.height);
+    return atan(2. / diameter) * 180. / CV_PI;
 }
 
 int computeLayers(const int width, const int height, const int minArea) {
@@ -246,9 +279,9 @@ cv::Size computeRotationSize(const cv::Size &dstSize, const cv::Size &templateSi
         {static_cast<double>(dstSize.width) - 1, static_cast<double>(dstSize.height) - 1}};
     std::vector<cv::Point2d> trans;
     cv::transform(points, trans, rotate);
-    auto rect = boundingRect(trans);
-    auto max  = rect.br();
-    auto min  = rect.tl();
+    const auto rect = boundingRect(trans);
+    const auto max  = rect.br();
+    const auto min  = rect.tl();
 
     if (angle > 0 && angle < 90) {
         ;
@@ -468,10 +501,52 @@ void filterOverlap(std::vector<Candidate> &candidates, const std::vector<cv::Rot
     }
 }
 
-Model *trainModel(const cv::Mat &src, int level, double startAngle, double spanAngle,
-                  double anglgStep) {
-    (void)(anglgStep);
+Region borderRegion(const cv::Mat &src) {
+    Region result;
 
+    for (int y = 0; y < src.rows; y++) {
+        auto *ptr    = src.ptr<uchar>(y);
+        bool  inside = false;
+        RLE   rle;
+        for (int x = 0; x < src.cols; x++) {
+            if (0 == ptr[ x ]) {
+                continue;
+            }
+
+            if (!inside) {
+                inside          = true;
+                rle.row         = y;
+                rle.startColumn = x;
+                rle.length      = 1;
+                continue;
+            }
+
+            rle.length++;
+            if (0 != ptr[ x - 1 ]) {
+                continue;
+            }
+
+            rle.length = x - rle.startColumn + 1;
+            break;
+        }
+
+        if (inside) {
+            result.push_back(rle);
+        }
+    }
+
+    return result;
+}
+
+void drawRegion(cv::Mat &src, const Region &region) {
+    for (const auto &rle : region) {
+        auto *ptr = src.ptr<uchar>(rle.row) + rle.startColumn;
+        memset(ptr, 255, rle.length);
+    }
+}
+
+Model2 *trainModel(const cv::Mat &src, int level, double startAngle, double spanAngle,
+                   double angleStep) {
     if (src.empty() || src.channels() != 1) {
         return nullptr;
     }
@@ -488,66 +563,86 @@ Model *trainModel(const cv::Mat &src, int level, double startAngle, double spanA
         return nullptr;
     }
 
-    auto  *result = new Model;
-    Model &model  = *result;
-    cv::buildPyramid(src, model.pyramids, level);
-    model.borderColor = cv::mean(src).val[ 0 ] < 128 ? 255 : 0;
-    model.reserve(model.pyramids.size());
+    if (angleStep < 0) {
+        auto size     = src.size();
+        auto diameter = sqrt(size.width * size.width + size.height * size.height);
+        angleStep     = diameter < 200 ? 1 : atan(2. / diameter) * 180. / CV_PI;
+    }
+    auto nAngle = static_cast<int>(ceil(spanAngle / angleStep));
 
-    for (const auto &pyramid : model.pyramids) {
-        const auto area    = pyramid.size().area();
-        auto       invArea = 1. / area;
+    auto   *result   = new Model2;
+    Model2 &model    = *result;
+    model.startAngle = startAngle;
+    model.angleStep  = angleStep;
+    model.stopAngle  = startAngle + angleStep * nAngle;
 
-        cv::Scalar mean;
-        cv::Scalar stdDev;
+    std::vector<cv::Mat> pyramids;
+    cv::buildPyramid(src, pyramids, level - 1);
+    for (int i = 0; i < level; i++) {
+        const auto &pyramid = pyramids[ i ];
+        cv::Scalar  mean;
+        cv::Scalar  stdDev;
         cv::meanStdDev(pyramid, mean, stdDev);
+        const auto &stdDevVal    = stdDev[ 0 ];
+        const auto  stdNormal    = stdDevVal * stdDevVal;
+        auto        noDifference = stdNormal < 1.;
+        if (noDifference) {
+            // all same grey value
+            break;
+        }
 
-        const auto stdNormal = stdDev[ 0 ] * stdDev[ 0 ] + stdDev[ 1 ] * stdDev[ 1 ] +
-                               stdDev[ 2 ] * stdDev[ 2 ] + stdDev[ 3 ] * stdDev[ 3 ];
-        auto equal1 = stdNormal < std::numeric_limits<double>::epsilon();
-        auto normal = sqrt(stdNormal) / sqrt(invArea);
+        const auto area = pyramid.size().area();
+        Layer      layer;
+        layer.invArea   = 1. / area;
+        layer.normal    = stdDevVal / sqrt(layer.invArea);
+        layer.angleStep = angleStep * (1 << i);
+        layer.mean      = mean[ 0 ];
 
-        auto                     currentAngleStep = sizeAngleStep(pyramid.size());
-        auto                     center           = sizeCenter(pyramid.size());
-        const auto               count = static_cast<int>(spanAngle / currentAngleStep) + 1;
+        auto count  = static_cast<int>(ceil(spanAngle / layer.angleStep));
+        auto center = sizeCenter(pyramid.size());
+
         std::vector<cv::Point2d> points{{0., 0.},
                                         {pyramid.cols - 1., 0.},
                                         {pyramid.cols - 1., pyramid.rows - 1.},
                                         {0., pyramid.rows - 1.}};
-        for (int i = 0; i < count; i++) {
-            auto angle  = startAngle + currentAngleStep * i;
-            auto rotate = cv::getRotationMatrix2D(center, angle, 1.0);
+        for (int j = 0; j < count; j++) {
+            Template layerTemplate;
+
+            layerTemplate.angle = startAngle + layer.angleStep * j;
+            auto rotate         = cv::getRotationMatrix2D(center, layerTemplate.angle, 1.0);
 
             std::vector<cv::Point2d> trans;
             cv::transform(points, trans, rotate);
             auto rect = boundingRect(trans);
+            auto rectSize =
+                cv::Size(static_cast<int>(ceil(rect.width)), static_cast<int>(ceil(rect.height)));
+            layerTemplate.center = sizeCenter(rectSize);
 
-            auto center2             = sizeCenter(rect.size());
-            auto offset              = center2 - center;
+            auto offset              = layerTemplate.center - center;
             rotate.at<double>(0, 2) += offset.x;
             rotate.at<double>(1, 2) += offset.y;
-
-            cv::Mat rotated;
-            cv::warpAffine(pyramid, rotated, rotate, rect.size(), cv::INTER_LINEAR,
-                           cv::BORDER_DEFAULT, cv::Scalar(model.borderColor));
+            cv::warpAffine(pyramid, layerTemplate.img, rotate, rectSize, cv::INTER_LINEAR,
+                           cv::BORDER_DEFAULT);
 
             // if background area less than 1 percent, just match rotated image
-            auto rate = static_cast<double>(area) / rotated.size().area();
+            auto rate = static_cast<double>(area) / rectSize.area();
             if (rate > 0.9) {
                 continue;
             }
 
-            // draw rotated rect line, then encode with run-length-encode
+            cv::Mat roi = cv::Mat::zeros(rectSize, CV_8UC1);
+            cv::line(roi, trans[ 0 ] + offset, trans[ 1 ] + offset, 255, 1, cv::LINE_8);
+            cv::line(roi, trans[ 1 ] + offset, trans[ 2 ] + offset, 255, 1, cv::LINE_8);
+            cv::line(roi, trans[ 2 ] + offset, trans[ 3 ] + offset, 255, 1, cv::LINE_8);
+            cv::line(roi, trans[ 3 ] + offset, trans[ 0 ] + offset, 255, 1, cv::LINE_8);
 
-            if (rotated.empty()) {
-                continue;
-            }
+            // draw rotated rect line, then encode with run-length-encode
+            layerTemplate.region = borderRegion(roi);
+
+            layer.templates.emplace_back(std::move(layerTemplate));
         }
 
-        model.equal1.push_back(equal1);
-        model.invArea.push_back(invArea);
-        model.mean.push_back(mean);
-        model.normal.push_back(normal);
+        model.layers.emplace_back(std::move(layer));
     }
 
     return result;
