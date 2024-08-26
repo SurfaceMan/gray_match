@@ -1,5 +1,6 @@
 #include "grayMatch.h"
 
+#include <complex.h>
 #include <opencv2/core/hal/intrin.hpp>
 #include <utility>
 
@@ -182,10 +183,12 @@ struct Layer {
 };
 
 struct Model2 {
-    double startAngle = 0;
-    double stopAngle  = 0;
-    double angleStep  = 0;
+    double startAngle  = 0;
+    double stopAngle   = 0;
+    double angleStep   = 0;
+    uchar  borderColor = 0;
 
+    cv::Mat            source;
     std::vector<Layer> layers;
 };
 
@@ -400,6 +403,34 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &
         }
     }
 }
+
+void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const Region &region,
+                       cv::Mat &result) {
+    result = cv::Mat::zeros(src.size() - templateImg.size() + cv::Size(1, 1), CV_32FC1);
+
+    for (int y = 0; y < result.rows; y++) {
+        auto *resultPtr = result.ptr<float>(y);
+        for (int x = 0; x < result.cols; x++) {
+            auto &score = resultPtr[ x ];
+            for (const auto &rle : region) {
+                auto *srcPtr  = src.ptr<uchar>(y + rle.row) + x;
+                auto *temPtr  = templateImg.ptr<uchar>(rle.row) + rle.startColumn;
+                score        += convSimd(temPtr, srcPtr, rle.length);
+            }
+        }
+    }
+}
+
+void matchTemplate(const cv::Mat &src, cv::Mat &result, const Template &layerTemplate,
+                   const double mean, const double normal, const double invArea) {
+    if (layerTemplate.region.empty()) {
+        matchTemplateSimd(src, layerTemplate.img, result);
+    } else {
+        matchTemplateSimd(src, layerTemplate.img, layerTemplate.region, result);
+    }
+
+    coeffDenominator(src, layerTemplate.img.size(), result, mean, normal, invArea, false);
+}
 #endif
 
 void matchTemplate(cv::Mat &src, cv::Mat &result, const Model *model, int level) {
@@ -545,6 +576,16 @@ void drawRegion(cv::Mat &src, const Region &region) {
     }
 }
 
+double normalizeAngle(const double angle) {
+    if (angle < 0.0) {
+        const int k = static_cast<int>(std::ceil(-angle / 360.0));
+        return angle + k * 360.0;
+    }
+
+    const int k = static_cast<int>(std::floor(angle / 360.0));
+    return angle - k * 360.0;
+}
+
 Model2 *trainModel(const cv::Mat &src, int level, double startAngle, double spanAngle,
                    double angleStep) {
     if (src.empty() || src.channels() != 1) {
@@ -568,6 +609,14 @@ Model2 *trainModel(const cv::Mat &src, int level, double startAngle, double span
         auto diameter = sqrt(size.width * size.width + size.height * size.height);
         angleStep     = diameter < 200 ? 1 : atan(2. / diameter) * 180. / CV_PI;
     }
+
+    if (spanAngle <= 0) {
+        return nullptr;
+    }
+    if (spanAngle > 360) {
+        spanAngle = 360;
+    }
+    startAngle  = normalizeAngle(startAngle);
     auto nAngle = static_cast<int>(ceil(spanAngle / angleStep));
 
     auto   *result   = new Model2;
@@ -575,6 +624,7 @@ Model2 *trainModel(const cv::Mat &src, int level, double startAngle, double span
     model.startAngle = startAngle;
     model.angleStep  = angleStep;
     model.stopAngle  = startAngle + angleStep * nAngle;
+    model.source     = src;
 
     std::vector<cv::Mat> pyramids;
     cv::buildPyramid(src, pyramids, level - 1);
@@ -645,7 +695,108 @@ Model2 *trainModel(const cv::Mat &src, int level, double startAngle, double span
         model.layers.emplace_back(std::move(layer));
     }
 
+    if (!model.layers.empty()) {
+        model.borderColor = model.layers.front().mean > 128 ? 0 : 255;
+    }
+
     return result;
+}
+
+std::vector<Candidate> matchTopLevel(const cv::Mat &dstTop, const Layer &layer, double startAngle,
+                                     double spanAngle, const double maxOverlap,
+                                     const double minScore, const int maxCount, const int level) {
+    std::vector<Candidate> candidates;
+
+    const auto topScoreThreshold = minScore * pow(0.9, level);
+    const bool calMaxByBlock =
+        (dstTop.size().area() / layer.templates.front().img.size().area() > 500) && maxCount > 10;
+    for (const auto &layerTemplate : layer.templates) {
+        cv::Mat result;
+        matchTemplate(dstTop, result, layerTemplate, layer.mean, layer.normal, layer.invArea);
+
+        if (calMaxByBlock) {
+            BlockMax  block(result, layerTemplate.img.size());
+            double    maxScore;
+            cv::Point maxPos;
+            block.maxValueLoc(maxScore, maxPos);
+            if (maxScore < topScoreThreshold) {
+                continue;
+            }
+
+            candidates.emplace_back(cv::Point2d(maxPos) - offset, angle, maxScore);
+            for (int j = 0; j < maxCount + CANDIDATE - 1; j++) {
+                nextMaxLoc(maxPos, templateTop.size(), maxOverlap, block, maxScore, maxPos);
+                if (maxScore < topScoreThreshold) {
+                    break;
+                }
+
+                candidates.emplace_back(cv::Point2d(maxPos) - offset, angle, maxScore);
+            }
+        } else {
+            double    maxScore;
+            cv::Point maxPos;
+            cv::minMaxLoc(result, nullptr, &maxScore, nullptr, &maxPos);
+            if (maxScore < topScoreThreshold) {
+                continue;
+            }
+
+            candidates.emplace_back(cv::Point2d(maxPos) - offset, angle, maxScore);
+            for (int j = 0; j < maxCount + CANDIDATE - 1; j++) {
+                nextMaxLoc(result, maxPos, templateTop.size(), maxOverlap, maxScore, maxPos);
+                if (maxScore < topScoreThreshold) {
+                    break;
+                }
+
+                candidates.emplace_back(cv::Point2d(maxPos) - offset, angle, maxScore);
+            }
+        }
+    }
+
+    return candidates;
+}
+
+std::vector<Pose> matchModel(const cv::Mat &dst, const Model2 *model, int level, double startAngle,
+                             double spanAngle, const double maxOverlap, const double minScore,
+                             const int maxCount, const int subpixel) {
+    // prepare
+    {
+        if (dst.empty() || nullptr == model || model->layers.empty()) {
+            return {};
+        }
+
+        auto &templateImg = model->source;
+        if (dst.cols < templateImg.cols || dst.rows < templateImg.rows ||
+            dst.size().area() < templateImg.size().area()) {
+            return {};
+        }
+
+        if (spanAngle <= 0) {
+            return {};
+        }
+        if (spanAngle > 360) {
+            spanAngle = 360;
+        }
+        startAngle     = normalizeAngle(startAngle);
+        auto stopAngle = startAngle + spanAngle;
+        if (startAngle < model->startAngle) {
+            startAngle = model->startAngle;
+        }
+        if (stopAngle > model->stopAngle) {
+            stopAngle = model->stopAngle;
+        }
+        spanAngle = stopAngle - startAngle;
+
+        const auto templateLevel = static_cast<int>(model->layers.size() - 1);
+        if (level < 0 || level > templateLevel) {
+            // level must greater than 1
+            level = templateLevel;
+        }
+    }
+
+    // TODO copyMakeBorder to enable part match
+
+    std::vector<cv::Mat> pyramids;
+    cv::buildPyramid(dst, pyramids, level);
 }
 
 std::vector<Candidate> matchTopLevel(const cv::Mat &dstTop, double startAngle, double spanAngle,
