@@ -443,11 +443,11 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const Reg
                 computeLine(temPtr, srcPtr, rle.length, dot, sum, sqSum);
             }
 
-            const auto partMean = sum * sum * invArea;
-            const auto num      = dot - sum * mean;
+            const auto partMean = static_cast<double>(sum * sum)  * invArea;
+            const auto num      = static_cast<double>(dot) - static_cast<double>(sum) * mean;
 
-            const auto diff   = std::max(sqSum - partMean, 0.);
             auto       fsqSum = static_cast<double>(sqSum);
+            const auto diff   = std::max( fsqSum - partMean, 0.);
             if (diff <= std::min(0.5, 10 * FLT_EPSILON * fsqSum)) {
                 fsqSum = 0;
             } else {
@@ -812,6 +812,8 @@ std::vector<Candidate> matchTopLevel(const cv::Mat &dstTop, const Layer &layer,
     return candidates;
 }
 
+#include <iostream>
+
 std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
                                       const double                  modelAngleStart,
                                       const std::vector<Candidate> &candidates,
@@ -822,9 +824,10 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
     for (const auto &candidate : candidates) {
         auto pose    = candidate;
         bool matched = true;
+        std::cout << "angle:" << pose.angle << ":";
         for (int currentLevel = level - 1; currentLevel >= 0; currentLevel--) {
             const auto &layer          = model->layers[ currentLevel ];
-            const int   anglendex      = cvRound((pose.angle - modelAngleStart) / layer.angleStep);
+            const int   anglendex      = static_cast<int>(round((pose.angle - modelAngleStart) / layer.angleStep));
             const auto &currentDstImg  = pyramids[ currentLevel ];
             const auto  center         = pose.pos * 2.;
             const auto  scoreThreshold = minScore * pow(0.9, currentLevel);
@@ -833,13 +836,14 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
             cv::Mat   newScoreRect;
             for (int i = -1; i <= 1; i++) {
                 auto index = anglendex + i;
-                if (index < 0 || index >= layer.templates.size()) {
+                if (index < 0 || index >= static_cast<int>(layer.templates.size())) {
                     // out of range
                     continue;
                 }
 
                 // out of range?
                 const auto &layerTemplate = layer.templates[ index ];
+                std::cout << layerTemplate.angle;
                 auto offset = cv::Point2d(layerTemplate.img.cols / 2., layerTemplate.img.rows / 2.);
                 cv::Rect rect(center - offset - cv::Point2d(3, 3),
                               center + offset + cv::Point2d(3, 3));
@@ -859,12 +863,14 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
                 }
 
                 cv::Mat result;
-                matchTemplate(currentDstImg(rect), result, layerTemplate, layer.mean, layer.normal,
+                cv::Mat roi = currentDstImg(rect);
+                matchTemplate(roi, result, layerTemplate, layer.mean, layer.normal,
                               layer.invArea);
 
                 double    maxScore;
                 cv::Point maxPos;
                 cv::minMaxLoc(result, nullptr, &maxScore, nullptr, &maxPos);
+                std::cout << "(" << maxScore << "),";
 
                 if (newCandidate.score >= maxScore || maxScore < scoreThreshold) {
                     continue;
@@ -881,6 +887,7 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
                 }
             }
 
+            std::cout << "---[" << currentLevel << "]";
             if (newCandidate.score < scoreThreshold) {
                 matched = false;
                 break;
@@ -892,6 +899,7 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
 
             pose = newCandidate;
         }
+        std::cout << std::endl;
 
         if (!matched) {
             continue;
