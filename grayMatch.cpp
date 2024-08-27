@@ -197,19 +197,10 @@ cv::Size computeRotationSize(const cv::Size &dstSize, const cv::Size &templateSi
     cv::Point2d min = trans[ 0 ];
     cv::Point2d max = trans[ 0 ];
     for (const auto &point : trans) {
-        if (point.x < min.x) {
-            min.x = point.x;
-        }
-        if (point.y < min.y) {
-            min.y = point.y;
-        }
-
-        if (point.x > max.x) {
-            max.x = point.x;
-        }
-        if (point.y > max.y) {
-            max.y = point.y;
-        }
+        min.x = std::min(min.x, point.x);
+        min.y = std::min(min.y, point.y);
+        max.x = std::max(max.x, point.x);
+        max.y = std::max(max.y, point.y);
     }
 
     if (angle > 0 && angle < 90) {
