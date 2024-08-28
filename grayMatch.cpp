@@ -456,6 +456,8 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &
     }
 }
 
+void drawRegion(cv::Mat &src, const Region &region);
+
 void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const Region &region,
                        cv::Mat &result, const double mean, const double normal,
                        const double invArea) {
@@ -493,6 +495,12 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const Reg
                 score = 0;
             }
         }
+    }
+
+    auto mat = templateImg;
+    drawRegion(mat, region);
+    if (!mat.empty()) {
+        return;
     }
 }
 
