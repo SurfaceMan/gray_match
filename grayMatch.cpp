@@ -167,10 +167,9 @@ struct RLE {
 using Region = std::vector<RLE>;
 
 struct Template {
-    cv::Mat     img;
-    Region      region;
-    cv::Point2d center;
-    double      angle = 0;
+    cv::Mat         img;
+    Region          region;
+    cv::RotatedRect rect;
 };
 
 struct Layer {
@@ -191,6 +190,38 @@ struct Model2 {
     cv::Mat            source;
     std::vector<Layer> layers;
 };
+
+inline void RotatedRectPoints(const cv::RotatedRect &rect, cv::Point2f pt[]) {
+    double _angle = -rect.angle * CV_PI / 180.;
+    float  b      = (float)cos(_angle) * 0.5f;
+    float  a      = (float)sin(_angle) * 0.5f;
+
+    pt[ 0 ].x = rect.center.x - a * rect.size.height - b * rect.size.width;
+    pt[ 0 ].y = rect.center.y + b * rect.size.height - a * rect.size.width;
+    pt[ 1 ].x = rect.center.x + a * rect.size.height - b * rect.size.width;
+    pt[ 1 ].y = rect.center.y - b * rect.size.height - a * rect.size.width;
+    pt[ 2 ].x = 2 * rect.center.x - pt[ 0 ].x;
+    pt[ 2 ].y = 2 * rect.center.y - pt[ 0 ].y;
+    pt[ 3 ].x = 2 * rect.center.x - pt[ 1 ].x;
+    pt[ 3 ].y = 2 * rect.center.y - pt[ 1 ].y;
+}
+
+inline void RotatedRectPoints(const cv::RotatedRect &rect, std::vector<cv::Point2f> &pts) {
+    pts.resize(4);
+    RotatedRectPoints(rect, pts.data());
+}
+
+inline cv::Rect boundingRect(const cv::RotatedRect &rect) {
+    cv::Point2f pt[ 4 ];
+    RotatedRectPoints(rect, pt);
+    cv::Rect r(cvFloor(std::min(std::min(std::min(pt[ 0 ].x, pt[ 1 ].x), pt[ 2 ].x), pt[ 3 ].x)),
+               cvFloor(std::min(std::min(std::min(pt[ 0 ].y, pt[ 1 ].y), pt[ 2 ].y), pt[ 3 ].y)),
+               cvCeil(std::max(std::max(std::max(pt[ 0 ].x, pt[ 1 ].x), pt[ 2 ].x), pt[ 3 ].x)),
+               cvCeil(std::max(std::max(std::max(pt[ 0 ].y, pt[ 1 ].y), pt[ 2 ].y), pt[ 3 ].y)));
+    r.width  -= r.x - 1;
+    r.height -= r.y - 1;
+    return r;
+}
 
 inline cv::Point2d transform(const cv::Point2d &point, const cv::Mat &rotate) {
     const auto ptr = rotate.ptr<double>();
@@ -443,11 +474,11 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const Reg
                 computeLine(temPtr, srcPtr, rle.length, dot, sum, sqSum);
             }
 
-            const auto partMean = static_cast<double>(sum * sum)  * invArea;
+            const auto partMean = static_cast<double>(sum * sum) * invArea;
             const auto num      = static_cast<double>(dot) - static_cast<double>(sum) * mean;
 
             auto       fsqSum = static_cast<double>(sqSum);
-            const auto diff   = std::max( fsqSum - partMean, 0.);
+            const auto diff   = std::max(fsqSum - partMean, 0.);
             if (diff <= std::min(0.5, 10 * FLT_EPSILON * fsqSum)) {
                 fsqSum = 0;
             } else {
@@ -514,6 +545,26 @@ void nextMaxLoc(cv::Mat &score, const cv::Point &pos, const cv::Size templateSiz
 
     // clear neighbor
     cv::rectangle(score, rectIgnore, cv::Scalar(-1), cv::FILLED);
+
+    cv::minMaxLoc(score, nullptr, &maxScore, nullptr, &maxPos);
+}
+
+void nextMaxLoc(cv::Mat &score, const cv::Point &pos, const cv::RotatedRect &rect,
+                const double maxOverlap, double &maxScore, cv::Point &maxPos) {
+    const auto alone = static_cast<float>(1.f - maxOverlap);
+
+    auto rectIgnore         = rect;
+    rectIgnore.center       = cv::Point2f(pos);
+    rectIgnore.size.width  *= (2 * alone);
+    rectIgnore.size.height *= (2 * alone);
+
+    // clear neighbor
+    std::vector<cv::Point2f> pts;
+    RotatedRectPoints(rectIgnore, pts);
+    cv::fillConvexPoly(score,
+                       std::vector<cv::Point>{cv::Point(pts[ 0 ]), cv::Point(pts[ 1 ]),
+                                              cv::Point(pts[ 2 ]), cv::Point(pts[ 3 ])},
+                       cv::Scalar(0));
 
     cv::minMaxLoc(score, nullptr, &maxScore, nullptr, &maxPos);
 }
@@ -694,42 +745,39 @@ Model2 *trainModel(const cv::Mat &src, int level, double startAngle, double span
 
         auto count  = static_cast<int>(ceil(spanAngle / layer.angleStep)) + 1;
         auto center = sizeCenter(pyramid.size());
-
-        std::vector<cv::Point2d> points{{0., 0.},
-                                        {pyramid.cols - 1., 0.},
-                                        {pyramid.cols - 1., pyramid.rows - 1.},
-                                        {0., pyramid.rows - 1.}};
         for (int j = 0; j < count; j++) {
             Template layerTemplate;
 
-            layerTemplate.angle = startAngle + layer.angleStep * j;
-            auto rotate         = cv::getRotationMatrix2D(center, layerTemplate.angle, 1.0);
+            auto angle         = startAngle + layer.angleStep * j;
+            layerTemplate.rect = {cv::Point2f(center), pyramid.size(), static_cast<float>(angle)};
+            auto rect          = boundingRect(layerTemplate.rect);
+            auto newCenter     = sizeCenter(rect.size());
 
-            std::vector<cv::Point2d> trans;
-            cv::transform(points, trans, rotate);
-            auto rect = boundingRect(trans);
-            auto rectSize =
-                cv::Size(static_cast<int>(ceil(rect.width)), static_cast<int>(ceil(rect.height)));
-            layerTemplate.center = sizeCenter(rectSize);
-
-            auto offset              = layerTemplate.center - center;
+            auto offset = newCenter - cv::Point2d(layerTemplate.rect.center);
+            auto rotate = cv::getRotationMatrix2D(layerTemplate.rect.center, angle, 1.);
             rotate.at<double>(0, 2) += offset.x;
             rotate.at<double>(1, 2) += offset.y;
-            cv::warpAffine(pyramid, layerTemplate.img, rotate, rectSize, cv::INTER_LINEAR,
+
+            auto &rotated = layerTemplate.img;
+            cv::warpAffine(pyramid, rotated, rotate, rect.size(), cv::INTER_LINEAR,
                            cv::BORDER_DEFAULT);
 
+            layerTemplate.rect.center = newCenter;
+
             // if background area less than 1 percent, just match rotated image
-            auto rate = static_cast<double>(area) / rectSize.area();
+            auto rate = static_cast<double>(area) / rect.size().area();
             if (rate > 0.9) {
                 layer.templates.emplace_back(std::move(layerTemplate));
                 continue;
             }
 
-            cv::Mat roi = cv::Mat::zeros(rectSize, CV_8UC1);
-            cv::line(roi, trans[ 0 ] + offset, trans[ 1 ] + offset, 255, 1, cv::LINE_8);
-            cv::line(roi, trans[ 1 ] + offset, trans[ 2 ] + offset, 255, 1, cv::LINE_8);
-            cv::line(roi, trans[ 2 ] + offset, trans[ 3 ] + offset, 255, 1, cv::LINE_8);
-            cv::line(roi, trans[ 3 ] + offset, trans[ 0 ] + offset, 255, 1, cv::LINE_8);
+            cv::Point2f trans[ 4 ];
+            RotatedRectPoints(layerTemplate.rect, trans);
+            cv::Mat roi = cv::Mat::zeros(rect.size(), CV_8UC1);
+            cv::line(roi, trans[ 0 ], trans[ 1 ], 255, 1, cv::LINE_8);
+            cv::line(roi, trans[ 1 ], trans[ 2 ], 255, 1, cv::LINE_8);
+            cv::line(roi, trans[ 2 ], trans[ 3 ], 255, 1, cv::LINE_8);
+            cv::line(roi, trans[ 3 ], trans[ 0 ], 255, 1, cv::LINE_8);
 
             // draw rotated rect line, then encode with run-length-encode
             layerTemplate.region = borderRegion(roi);
@@ -775,16 +823,17 @@ std::vector<Candidate> matchTopLevel(const cv::Mat &dstTop, const Layer &layer,
                 continue;
             }
 
-            candidates.emplace_back(cv::Point2d(maxPos) + layerTemplate.center, layerTemplate.angle,
-                                    maxScore);
+            candidates.emplace_back(cv::Point2d(maxPos) + cv::Point2d(layerTemplate.rect.center),
+                                    layerTemplate.rect.angle, maxScore);
             for (int j = 0; j < maxCount + CANDIDATE - 1; j++) {
                 nextMaxLoc(maxPos, layerTemplate.img.size(), maxOverlap, block, maxScore, maxPos);
                 if (maxScore < topScoreThreshold) {
                     break;
                 }
 
-                candidates.emplace_back(cv::Point2d(maxPos) + layerTemplate.center,
-                                        layerTemplate.angle, maxScore);
+                candidates.emplace_back(cv::Point2d(maxPos) +
+                                            cv::Point2d(layerTemplate.rect.center),
+                                        layerTemplate.rect.angle, maxScore);
             }
         } else {
             double    maxScore;
@@ -794,16 +843,18 @@ std::vector<Candidate> matchTopLevel(const cv::Mat &dstTop, const Layer &layer,
                 continue;
             }
 
-            candidates.emplace_back(cv::Point2d(maxPos) + layerTemplate.center, layerTemplate.angle,
-                                    maxScore);
+            candidates.emplace_back(cv::Point2d(maxPos) + cv::Point2d(layerTemplate.rect.center),
+                                    layerTemplate.rect.angle, maxScore);
             for (int j = 0; j < maxCount + CANDIDATE - 1; j++) {
-                nextMaxLoc(result, maxPos, layerTemplate.img.size(), maxOverlap, maxScore, maxPos);
+
+                nextMaxLoc(result, maxPos, layerTemplate.rect, maxOverlap, maxScore, maxPos);
                 if (maxScore < topScoreThreshold) {
                     break;
                 }
 
-                candidates.emplace_back(cv::Point2d(maxPos) + layerTemplate.center,
-                                        layerTemplate.angle, maxScore);
+                candidates.emplace_back(cv::Point2d(maxPos) +
+                                            cv::Point2d(layerTemplate.rect.center),
+                                        layerTemplate.rect.angle, maxScore);
             }
         }
     }
@@ -826,8 +877,9 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
         bool matched = true;
         std::cout << "angle:" << pose.angle << ":";
         for (int currentLevel = level - 1; currentLevel >= 0; currentLevel--) {
-            const auto &layer          = model->layers[ currentLevel ];
-            const int   anglendex      = static_cast<int>(round((pose.angle - modelAngleStart) / layer.angleStep));
+            const auto &layer = model->layers[ currentLevel ];
+            const int   anglendex =
+                static_cast<int>(round((pose.angle - modelAngleStart) / layer.angleStep));
             const auto &currentDstImg  = pyramids[ currentLevel ];
             const auto  center         = pose.pos * 2.;
             const auto  scoreThreshold = minScore * pow(0.9, currentLevel);
@@ -843,7 +895,7 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
 
                 // out of range?
                 const auto &layerTemplate = layer.templates[ index ];
-                std::cout << layerTemplate.angle;
+                std::cout << layerTemplate.rect.angle;
                 auto offset = cv::Point2d(layerTemplate.img.cols / 2., layerTemplate.img.rows / 2.);
                 cv::Rect rect(center - offset - cv::Point2d(3, 3),
                               center + offset + cv::Point2d(3, 3));
@@ -864,8 +916,7 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
 
                 cv::Mat result;
                 cv::Mat roi = currentDstImg(rect);
-                matchTemplate(roi, result, layerTemplate, layer.mean, layer.normal,
-                              layer.invArea);
+                matchTemplate(roi, result, layerTemplate, layer.mean, layer.normal, layer.invArea);
 
                 double    maxScore;
                 cv::Point maxPos;
@@ -876,8 +927,9 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
                     continue;
                 }
 
-                newCandidate = {cv::Point2d(maxPos) + cv::Point2d(rect.tl()) + layerTemplate.center,
-                                layerTemplate.angle, maxScore};
+                newCandidate = {cv::Point2d(maxPos) + cv::Point2d(rect.tl()) +
+                                    cv::Point2d(layerTemplate.rect.center),
+                                layerTemplate.rect.angle, maxScore};
                 if (0 == currentLevel && 1 == subpixel) {
                     auto isBorder = 0 == maxPos.x || 0 == maxPos.y || result.cols - 1 == maxPos.x ||
                                     result.rows - 1 == maxPos.y;
