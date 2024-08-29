@@ -1,43 +1,14 @@
 #include "grayMatch.h"
+#include "privateType.h"
 
 #include <opencv2/core/hal/intrin.hpp>
+#include <opencv2/opencv.hpp>
 #include <utility>
 
 constexpr int    MIN_AREA  = 256;
 constexpr double TOLERANCE = 0.0000001;
 constexpr int    CANDIDATE = 5;
 constexpr double INVALID   = -1.;
-
-struct Model {
-    std::vector<cv::Mat>    pyramids;
-    std::vector<cv::Scalar> mean;
-    std::vector<double>     normal;
-    std::vector<double>     invArea;
-    std::vector<bool>       equal1;
-    uchar                   borderColor = 0;
-
-    void clear() {
-        pyramids.clear();
-        normal.clear();
-        invArea.clear();
-        mean.clear();
-        equal1.clear();
-    }
-
-    void resize(const std::size_t size) {
-        normal.resize(size);
-        invArea.resize(size);
-        mean.resize(size);
-        equal1.resize(size);
-    }
-
-    void reserve(const std::size_t size) {
-        normal.reserve(size);
-        invArea.reserve(size);
-        mean.reserve(size);
-        equal1.reserve(size);
-    }
-};
 
 struct BlockMax {
     struct Block {
@@ -445,8 +416,8 @@ Model *trainModel(const cv::Mat &src, int level) {
         return nullptr;
     }
 
-    if (level < 0) {
-        // level must greater than 1
+    if (level <= 0) {
+        // level must greater than 0
         level = computeLayers(src.size().width, src.size().height, MIN_AREA);
     }
 
@@ -721,4 +692,105 @@ std::vector<Pose> matchModel(const cv::Mat &dst, const Model *model, int level,
     }
 
     return result;
+}
+
+Model_t trainModel(const unsigned char *data, int width, int height, int channels, int bytesPerline,
+                   int levelNum) {
+    if (1 != channels && 3 == channels && 4 == channels) {
+        return nullptr;
+    }
+
+    auto    type = channels == 1 ? CV_8UC1 : (channels == 3 ? CV_8UC3 : CV_8UC4);
+    cv::Mat img(cv::Size(width, height), type, (void *)data, bytesPerline);
+
+    cv::Mat src;
+    1 == channels
+        ? src = img
+        : cv::cvtColor(img, src, channels == 3 ? cv::COLOR_RGB2GRAY : cv::COLOR_RGBA2GRAY);
+
+    return trainModel(src, levelNum);
+}
+
+void matchModel(const unsigned char *data, int width, int height, int channels, int bytesPerline,
+                const Model_t model, int *count, Pose *poses, int level, double startAngle,
+                double spanAngle, double maxOverlap, double minScore, int subpixel) {
+    if (nullptr == count) {
+        return;
+    }
+
+    if (nullptr == poses) {
+        *count = 0;
+        return;
+    }
+
+    if (1 != channels && 3 != channels && 4 != channels) {
+        *count = 0;
+        return;
+    }
+
+    auto    type = channels == 1 ? CV_8UC1 : (channels == 3 ? CV_8UC3 : CV_8UC4);
+    cv::Mat img(cv::Size(width, height), type, (void *)data, bytesPerline);
+
+    cv::Mat dst;
+    1 == channels
+        ? dst = img
+        : cv::cvtColor(img, dst, channels == 3 ? cv::COLOR_RGB2GRAY : cv::COLOR_RGBA2GRAY);
+
+    auto result = matchModel(dst, model, level, startAngle, spanAngle, maxOverlap, minScore, *count,
+                             subpixel);
+
+    auto size = std::min(*count, static_cast<int>(result.size()));
+    for (int i = 0; i < size; i++) {
+        poses[ i ] = result[ i ];
+    }
+
+    *count = size;
+}
+
+void freeModel(Model_t *model) {
+    if (nullptr == model) {
+        return;
+    }
+
+    delete *model;
+    model = nullptr;
+}
+
+int modelLevel(const Model_t model) {
+    if (nullptr == model) {
+        return 0;
+    }
+
+    return static_cast<int>(model->pyramids.size());
+}
+
+void modelImage(const Model_t model, int level, unsigned char *data, int length, int *width,
+                int *height, int *channels) {
+    if (nullptr == model) {
+        return;
+    }
+
+    if (level < 0 || level > model->pyramids.size() - 1) {
+        return;
+    }
+
+    const auto &img = model->pyramids[ level ];
+    if (nullptr != width) {
+        *width = img.cols;
+    }
+    if (nullptr != height) {
+        *height = img.rows;
+    }
+    if (nullptr != channels) {
+        *channels = img.channels();
+    }
+
+    if (nullptr == data || length < img.cols * img.rows * img.channels()) {
+        return;
+    }
+
+    for (int y = 0; y < img.rows; y++) {
+        const auto *ptr = img.ptr<unsigned char>(y);
+        memcpy(data + y * img.cols, ptr, img.cols);
+    }
 }

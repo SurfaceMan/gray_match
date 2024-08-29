@@ -10,18 +10,34 @@ int main() {
         cv::imread("C:/Users/qiuyong/Desktop/test/template/model3_src1.bmp", cv::IMREAD_GRAYSCALE);
 
     auto t0    = cv::getTickCount();
-    auto model = trainModel(src, -1);
+    auto model = trainModel(src.data, src.cols, src.rows, src.channels(), int(src.step), -1);
     auto t1    = cv::getTickCount();
-    auto poses = matchModel(dst, model, -1, 0, 360, 0, 0.5, 70, 1);
-    auto t2    = cv::getTickCount();
+
+    int size;
+    serialize(model, nullptr, &size);
+    std::vector<uchar> buffer(size);
+    serialize(model, buffer.data(), &size);
+
+    freeModel(&model);
+
+    model = deserialize(buffer.data(), int(buffer.size()));
+
+    int               num = 70;
+    std::vector<Pose> poses(num);
+
+    auto t2 = cv::getTickCount();
+    matchModel(dst.data, dst.cols, dst.rows, dst.channels(), int(dst.step), model, &num,
+               poses.data(), -1, 0, 360, 0, 0.5, 1);
+    auto t3 = cv::getTickCount();
 
     auto trainCost = double(t1 - t0) / cv::getTickFrequency();
-    auto matchCost = double(t2 - t1) / cv::getTickFrequency();
+    auto matchCost = double(t3 - t2) / cv::getTickFrequency();
     std::cout << "train(s):" << trainCost << " match(s):" << matchCost << std::endl;
 
     cv::Mat color;
     cv::cvtColor(dst, color, cv::COLOR_GRAY2RGB);
-    for (auto &pose : poses) {
+    for (int i = 0; i < num; i++) {
+        auto           &pose = poses[ i ];
         cv::RotatedRect rect(cv::Point2f(pose.x, pose.y), src.size(), -pose.angle);
 
         std::vector<cv::Point2f> pts;
