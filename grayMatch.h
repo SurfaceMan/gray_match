@@ -45,7 +45,7 @@ API_PUBLIC Model_t trainModel(const unsigned char *data, int width, int height, 
  * @param model trained model
  * @param count in(max detect count)/out(found count)
  * @param poses pose array inited with size not less than count
- * @param level match start at which level (level>0 && level<modelLevel-1)
+ * @param level match start at which level (level>=0 && level<modelLevel-1)
  * @param startAngle rotation start angle
  * @param spanAngle rotation angle range
  * @param maxOverlap overlap threshold
@@ -69,7 +69,7 @@ API_PUBLIC int modelLevel(const Model_t model);
 /**
  * @brief get trained model image
  * @param model
- * @param level pyramid level index(level>0 && level<modelLevel-1)
+ * @param level pyramid level index(level>=0 && level<modelLevel-1)
  * @param data image data buffer(need allocated), can input nullptr to query width/height/channels
  * @param length buffer length not less than width*height*channels
  * @param width image width,  can input nullptr
