@@ -21,11 +21,16 @@ struct Pose {
  * @param height image height
  * @param channels image channels 1(gray)/3(rgb)/4(rgba)
  * @param bytesPerline bytes per line
+ * @param roiLeft rectangle roi left
+ * @param roiTop rectangle roi top
+ * @param roiWidth rectangle roi width
+ * @param roiHeight rectangle roi height
  * @param levelNum pyramid levels (> 0)
- * @return model
+ * @return
  */
 API_PUBLIC Model_t trainModel(const unsigned char *data, int width, int height, int channels,
-                              int bytesPerline, int levelNum);
+                              int bytesPerline, int roiLeft, int roiTop, int roiWidth,
+                              int roiHeight, int levelNum);
 /**
  * @brief match model
  * @param data image data
@@ -33,6 +38,10 @@ API_PUBLIC Model_t trainModel(const unsigned char *data, int width, int height, 
  * @param height image height
  * @param channels image channels 1(gray)/3(rgb)/4(rgba)
  * @param bytesPerline bytes per line
+ * @param roiLeft rectangle roi left
+ * @param roiTop rectangle roi top
+ * @param roiWidth rectangle roi width
+ * @param roiHeight rectangle roi height
  * @param model trained model
  * @param count in(max detect count)/out(found count)
  * @param poses pose array inited with size not less than count
@@ -45,9 +54,10 @@ API_PUBLIC Model_t trainModel(const unsigned char *data, int width, int height, 
  * @return
  */
 API_PUBLIC void matchModel(const unsigned char *data, int width, int height, int channels,
-                           int bytesPerline, const Model_t model, int *count, Pose *poses,
-                           int level, double startAngle, double spanAngle, double maxOverlap,
-                           double minScore, int subpixel);
+                           int bytesPerline, int roiLeft, int roiTop, int roiWidth, int roiHeight,
+                           const Model_t model, int *count, Pose *poses, int level,
+                           double startAngle, double spanAngle, double maxOverlap, double minScore,
+                           int subpixel);
 
 /**
  * @brief get trained model levels

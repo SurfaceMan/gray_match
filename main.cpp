@@ -10,7 +10,8 @@ int main() {
         cv::imread("C:/Users/qiuyong/Desktop/test/template/model3_src1.bmp", cv::IMREAD_GRAYSCALE);
 
     auto t0    = cv::getTickCount();
-    auto model = trainModel(src.data, src.cols, src.rows, src.channels(), int(src.step), -1);
+    auto model = trainModel(src.data, src.cols, src.rows, src.channels(), int(src.step), 0, 0,
+                            src.cols, src.rows, -1);
     auto t1    = cv::getTickCount();
 
     int size;
@@ -26,8 +27,8 @@ int main() {
     std::vector<Pose> poses(num);
 
     auto t2 = cv::getTickCount();
-    matchModel(dst.data, dst.cols, dst.rows, dst.channels(), int(dst.step), model, &num,
-               poses.data(), -1, 0, 360, 0, 0.5, 1);
+    matchModel(dst.data, dst.cols, dst.rows, dst.channels(), int(dst.step), 0, 0, dst.cols,
+               dst.rows, model, &num, poses.data(), -1, 0, 360, 0, 0.5, 1);
     auto t3 = cv::getTickCount();
 
     auto trainCost = double(t1 - t0) / cv::getTickFrequency();
@@ -40,7 +41,7 @@ int main() {
         auto           &pose = poses[ i ];
         cv::RotatedRect rect(cv::Point2f(pose.x, pose.y), src.size(), -pose.angle);
 
-        std::vector<cv::Point2f> pts;
+        cv::Point2f pts[ 4 ];
         rect.points(pts);
 
         cv::line(color, pts[ 0 ], pts[ 1 ], cv::Scalar(255, 0, 0), 1, cv::LINE_AA);

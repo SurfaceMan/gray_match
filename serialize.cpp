@@ -182,7 +182,7 @@ public:
 };
 
 void operation(Buffer *buf, Model &model) {
-    buf->operator&(model);
+    (*buf) & (model);
 }
 
 bool serialize(const Model_t model, unsigned char *buffer, int *size) {

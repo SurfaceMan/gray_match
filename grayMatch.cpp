@@ -261,7 +261,7 @@ void coeffDenominator(const cv::Mat &src, const cv::Size &templateSize, cv::Mat 
 
 #ifdef CV_SIMD
 float convSimd(const uchar *kernel, const uchar *src, const int kernelWidth) {
-    const auto blockSize = cv::VTraits<cv::v_uint8>::vlanes();
+    const auto blockSize = cv::v_uint8::nlanes;
     auto       vSum      = cv::vx_setall_u32(0);
     int        i         = 0;
     for (; i < kernelWidth - blockSize; i += blockSize) {
@@ -695,8 +695,8 @@ std::vector<Pose> matchModel(const cv::Mat &dst, const Model *model, int level,
 }
 
 Model_t trainModel(const unsigned char *data, int width, int height, int channels, int bytesPerline,
-                   int levelNum) {
-    if (1 != channels && 3 == channels && 4 == channels) {
+                   int roiLeft, int roiTop, int roiWidth, int roiHeight, int levelNum) {
+    if (1 != channels && 3 == channels && 4 == channels || nullptr == data) {
         return nullptr;
     }
 
@@ -708,17 +708,25 @@ Model_t trainModel(const unsigned char *data, int width, int height, int channel
         ? src = img
         : cv::cvtColor(img, src, channels == 3 ? cv::COLOR_RGB2GRAY : cv::COLOR_RGBA2GRAY);
 
-    return trainModel(src, levelNum);
+    cv::Rect rect(roiLeft, roiTop, roiWidth, roiHeight);
+    cv::Rect imageRect(0, 0, width, height);
+    auto     roi = rect & imageRect;
+    if (roi.empty()) {
+        return nullptr;
+    }
+
+    return trainModel(src(roi), levelNum);
 }
 
 void matchModel(const unsigned char *data, int width, int height, int channels, int bytesPerline,
-                const Model_t model, int *count, Pose *poses, int level, double startAngle,
-                double spanAngle, double maxOverlap, double minScore, int subpixel) {
+                int roiLeft, int roiTop, int roiWidth, int roiHeight, const Model_t model,
+                int *count, Pose *poses, int level, double startAngle, double spanAngle,
+                double maxOverlap, double minScore, int subpixel) {
     if (nullptr == count) {
         return;
     }
 
-    if (nullptr == poses) {
+    if (nullptr == poses || nullptr == data) {
         *count = 0;
         return;
     }
@@ -736,24 +744,33 @@ void matchModel(const unsigned char *data, int width, int height, int channels, 
         ? dst = img
         : cv::cvtColor(img, dst, channels == 3 ? cv::COLOR_RGB2GRAY : cv::COLOR_RGBA2GRAY);
 
-    auto result = matchModel(dst, model, level, startAngle, spanAngle, maxOverlap, minScore, *count,
-                             subpixel);
+    cv::Rect rect(roiLeft, roiTop, roiWidth, roiHeight);
+    cv::Rect imageRect(0, 0, width, height);
+    auto     roi = rect & imageRect;
+    if (roi.empty()) {
+        *count = 0;
+        return;
+    }
+
+    auto result = matchModel(dst(roi), model, level, startAngle, spanAngle, maxOverlap, minScore,
+                             *count, subpixel);
 
     auto size = std::min(*count, static_cast<int>(result.size()));
     for (int i = 0; i < size; i++) {
-        poses[ i ] = result[ i ];
+        const auto &pose = result[ i ];
+        poses[ i ]       = {pose.x + roi.x, pose.y + roi.y, pose.angle, pose.score};
     }
 
     *count = size;
 }
 
 void freeModel(Model_t *model) {
-    if (nullptr == model) {
+    if (nullptr == model || nullptr == *model) {
         return;
     }
 
     delete *model;
-    model = nullptr;
+    *model = nullptr;
 }
 
 int modelLevel(const Model_t model) {
