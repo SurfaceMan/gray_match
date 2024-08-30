@@ -696,7 +696,7 @@ std::vector<Pose> matchModel(const cv::Mat &dst, const Model *model, int level,
 
 Model_t trainModel(const unsigned char *data, int width, int height, int channels, int bytesPerline,
                    int roiLeft, int roiTop, int roiWidth, int roiHeight, int levelNum) {
-    if (1 != channels && 3 == channels && 4 == channels || nullptr == data) {
+    if ((1 != channels && 3 == channels && 4 == channels) || nullptr == data) {
         return nullptr;
     }
 
@@ -704,9 +704,11 @@ Model_t trainModel(const unsigned char *data, int width, int height, int channel
     cv::Mat img(cv::Size(width, height), type, (void *)data, bytesPerline);
 
     cv::Mat src;
-    1 == channels
-        ? src = img
-        : cv::cvtColor(img, src, channels == 3 ? cv::COLOR_RGB2GRAY : cv::COLOR_RGBA2GRAY);
+    if(1 == channels){
+        src = img;
+    }else{
+        cv::cvtColor(img, src, channels == 3 ? cv::COLOR_RGB2GRAY : cv::COLOR_RGBA2GRAY);
+    }
 
     cv::Rect rect(roiLeft, roiTop, roiWidth, roiHeight);
     cv::Rect imageRect(0, 0, width, height);
@@ -740,9 +742,11 @@ void matchModel(const unsigned char *data, int width, int height, int channels, 
     cv::Mat img(cv::Size(width, height), type, (void *)data, bytesPerline);
 
     cv::Mat dst;
-    1 == channels
-        ? dst = img
-        : cv::cvtColor(img, dst, channels == 3 ? cv::COLOR_RGB2GRAY : cv::COLOR_RGBA2GRAY);
+    if(1 == channels){
+        dst = img;
+    }else{
+        cv::cvtColor(img, dst, channels == 3 ? cv::COLOR_RGB2GRAY : cv::COLOR_RGBA2GRAY);
+    }
 
     cv::Rect rect(roiLeft, roiTop, roiWidth, roiHeight);
     cv::Rect imageRect(0, 0, width, height);
@@ -758,7 +762,7 @@ void matchModel(const unsigned char *data, int width, int height, int channels, 
     auto size = std::min(*count, static_cast<int>(result.size()));
     for (int i = 0; i < size; i++) {
         const auto &pose = result[ i ];
-        poses[ i ]       = {pose.x + roi.x, pose.y + roi.y, pose.angle, pose.score};
+        poses[ i ]       = {pose.x + static_cast<float>(roi.x), pose.y + static_cast<float>(roi.y), pose.angle, pose.score};
     }
 
     *count = size;
@@ -787,7 +791,7 @@ void modelImage(const Model_t model, int level, unsigned char *data, int length,
         return;
     }
 
-    if (level < 0 || level > model->pyramids.size() - 1) {
+    if (level < 0 || level > static_cast<int>(model->pyramids.size() - 1)) {
         return;
     }
 

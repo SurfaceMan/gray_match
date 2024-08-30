@@ -36,35 +36,33 @@ public:
     virtual void write(void *dst, void *src, int size) = 0;
 };
 
-class WriteOperation : public WriteOperationBase {
-public:
-    void write(void *dst, void *src, int size) final {
-        memcpy(dst, src, size);
-    }
-};
 
-class FakeWriteOperation : public WriteOperationBase {
-public:
-    void write(void *dst, void *src, int size) final {
-        (void)(dst);
-        (void)(src);
-        (void)(size);
-    }
-};
+void binWrite(void *dst, void *src, int size) {
+    memcpy(dst, src, size);
+}
 
-template <typename Operation> class OutBuffer : public Buffer, public Operation {
+
+void fakeWrite(void *dst, void *src, int size)  {
+    (void)(dst);
+    (void)(src);
+    (void)(size);
+}
+
+using Write = void(*)(void*,void*,int);
+
+template <Write write> class OutBuffer : public Buffer {
 public:
     OutBuffer(unsigned char *data_)
         : Buffer(0, data_) {}
 
     void operator&(uchar &val) final {
         write(m_data + m_size, &val, sizeof(val));
-        m_size += sizeof(val);
+        m_size += static_cast<int>(sizeof(val));
     }
     void operator&(std::vector<cv::Mat> &val) final {
         int size = static_cast<int>(val.size());
         write(m_data + m_size, &size, sizeof(size));
-        m_size += sizeof(size);
+        m_size += static_cast<int>(sizeof(size));
 
         for (auto &element : val) {
             writeElement(element);
@@ -72,10 +70,10 @@ public:
     }
     void writeElement(cv::Mat &val) {
         write(m_data + m_size, &val.cols, sizeof(int));
-        m_size += sizeof(int);
+        m_size += static_cast<int>(sizeof(int));
 
         write(m_data + m_size, &val.rows, sizeof(int));
-        m_size += sizeof(int);
+        m_size += static_cast<int>(sizeof(int));
 
         for (int i = 0; i < val.rows; i++) {
             write(m_data + m_size, val.ptr<unsigned char>(i), val.cols);
@@ -85,7 +83,7 @@ public:
     void operator&(std::vector<cv::Scalar> &val) final {
         int size = static_cast<int>(val.size());
         write(m_data + m_size, &size, sizeof(size));
-        m_size += sizeof(size);
+        m_size += static_cast<int>(sizeof(size));
 
         for (auto &element : val) {
             writeElement(element);
@@ -93,28 +91,28 @@ public:
     }
     void writeElement(cv::Scalar &val) {
         write(m_data + m_size, val.val, sizeof(double) * 4);
-        m_size += sizeof(double) * 4;
+        m_size += static_cast<int>(sizeof(double)) * 4;
     }
     void operator&(std::vector<double> &val) final {
         int size = static_cast<int>(val.size());
         write(m_data + m_size, &size, sizeof(size));
-        m_size += sizeof(size);
+        m_size += static_cast<int>(sizeof(size));
 
-        write(m_data + m_size, val.data(), sizeof(double) * size);
-        m_size += sizeof(double) * size;
+        write(m_data + m_size, val.data(), static_cast<int>(sizeof(double)) * size);
+        m_size += static_cast<int>(sizeof(double)) * size;
     }
     void operator&(std::vector<uchar> &val) final {
         int size = static_cast<int>(val.size());
         write(m_data + m_size, &size, sizeof(size));
-        m_size += sizeof(size);
+        m_size += static_cast<int>(sizeof(size));
 
         write(m_data + m_size, val.data(), sizeof(uchar) * size);
-        m_size += sizeof(uchar) * size;
+        m_size += static_cast<int>(sizeof(uchar)) * size;
     }
 };
 
-using SizeCountBuffer = OutBuffer<FakeWriteOperation>;
-using WriteBuffer     = OutBuffer<WriteOperation>;
+using SizeCountBuffer = OutBuffer<fakeWrite>;
+using WriteBuffer     = OutBuffer<binWrite>;
 
 class ReadBuffer : public Buffer {
 public:
@@ -123,13 +121,13 @@ public:
 
     void operator&(uchar &val) final {
         memcpy(&val, m_data + m_size, sizeof(uchar));
-        m_size += sizeof(uchar);
+        m_size += static_cast<int>(sizeof(uchar));
     }
     void operator&(std::vector<cv::Mat> &val) final {
         int count = 0;
         memcpy(&count, m_data + m_size, sizeof(int));
         val.resize(count);
-        m_size += sizeof(count);
+        m_size += static_cast<int>(sizeof(count));
 
         for (auto &element : val) {
             read(element);
@@ -138,11 +136,11 @@ public:
     void read(cv::Mat &val) {
         int width = 0;
         memcpy(&width, m_data + m_size, sizeof(int));
-        m_size += sizeof(int);
+        m_size += static_cast<int>(sizeof(int));
 
         int height = 0;
         memcpy(&height, m_data + m_size, sizeof(int));
-        m_size += sizeof(int);
+        m_size += static_cast<int>(sizeof(int));
 
         val     = cv::Mat(cv::Size(width, height), CV_8UC1, m_data + m_size);
         m_size += width * height;
@@ -151,7 +149,7 @@ public:
         int count = 0;
         memcpy(&count, m_data + m_size, sizeof(int));
         val.resize(count);
-        m_size += sizeof(count);
+        m_size += static_cast<int>(sizeof(count));
 
         for (auto &element : val) {
             read(element);
@@ -159,25 +157,25 @@ public:
     }
     void read(cv::Scalar &val) {
         memcpy(val.val, m_data + m_size, sizeof(double) * 4);
-        m_size += sizeof(double) * 4;
+        m_size += static_cast<int>(sizeof(double)) * 4;
     }
     void operator&(std::vector<double> &val) final {
         int count = 0;
         memcpy(&count, m_data + m_size, sizeof(int));
         val.resize(count);
-        m_size += sizeof(count);
+        m_size += static_cast<int>(sizeof(count));
 
         memcpy(val.data(), m_data + m_size, sizeof(double) * count);
-        m_size += sizeof(double) * count;
+        m_size += static_cast<int>(sizeof(double) )* count;
     }
     void operator&(std::vector<uchar> &val) final {
         int count = 0;
         memcpy(&count, m_data + m_size, sizeof(int));
         val.resize(count);
-        m_size += sizeof(count);
+        m_size += static_cast<int>(sizeof(count));
 
         memcpy(val.data(), m_data + m_size, sizeof(bool) * count);
-        m_size += sizeof(bool) * count;
+        m_size += static_cast<int>(sizeof(uchar)) * count;
     }
 };
 
