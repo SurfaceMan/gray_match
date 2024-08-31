@@ -36,19 +36,17 @@ public:
     virtual void write(void *dst, void *src, int size) = 0;
 };
 
-
 void binWrite(void *dst, void *src, int size) {
     memcpy(dst, src, size);
 }
 
-
-void fakeWrite(void *dst, void *src, int size)  {
+void fakeWrite(void *dst, void *src, int size) {
     (void)(dst);
     (void)(src);
     (void)(size);
 }
 
-using Write = void(*)(void*,void*,int);
+using Write = void (*)(void *, void *, int);
 
 template <Write write> class OutBuffer : public Buffer {
 public:
@@ -166,7 +164,7 @@ public:
         m_size += static_cast<int>(sizeof(count));
 
         memcpy(val.data(), m_data + m_size, sizeof(double) * count);
-        m_size += static_cast<int>(sizeof(double) )* count;
+        m_size += static_cast<int>(sizeof(double)) * count;
     }
     void operator&(std::vector<uchar> &val) final {
         int count = 0;

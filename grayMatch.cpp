@@ -704,9 +704,9 @@ Model_t trainModel(const unsigned char *data, int width, int height, int channel
     cv::Mat img(cv::Size(width, height), type, (void *)data, bytesPerline);
 
     cv::Mat src;
-    if(1 == channels){
+    if (1 == channels) {
         src = img;
-    }else{
+    } else {
         cv::cvtColor(img, src, channels == 3 ? cv::COLOR_RGB2GRAY : cv::COLOR_RGBA2GRAY);
     }
 
@@ -742,9 +742,9 @@ void matchModel(const unsigned char *data, int width, int height, int channels, 
     cv::Mat img(cv::Size(width, height), type, (void *)data, bytesPerline);
 
     cv::Mat dst;
-    if(1 == channels){
+    if (1 == channels) {
         dst = img;
-    }else{
+    } else {
         cv::cvtColor(img, dst, channels == 3 ? cv::COLOR_RGB2GRAY : cv::COLOR_RGBA2GRAY);
     }
 
@@ -762,7 +762,8 @@ void matchModel(const unsigned char *data, int width, int height, int channels, 
     auto size = std::min(*count, static_cast<int>(result.size()));
     for (int i = 0; i < size; i++) {
         const auto &pose = result[ i ];
-        poses[ i ]       = {pose.x + static_cast<float>(roi.x), pose.y + static_cast<float>(roi.y), pose.angle, pose.score};
+        poses[ i ]       = {pose.x + static_cast<float>(roi.x), pose.y + static_cast<float>(roi.y),
+                            pose.angle, pose.score};
     }
 
     *count = size;
