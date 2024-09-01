@@ -300,7 +300,7 @@ void matchTemplate(cv::Mat &src, cv::Mat &result, const Model *model, int level)
     cv::matchTemplate(src, model->pyramids[ level ], result, cv::TM_CCORR);
 #endif
     coeffDenominator(src, model->pyramids[ level ].size(), result, model->mean[ level ][ 0 ],
-                     model->normal[ level ], model->invArea[ level ], model->equal1[ level ]);
+                     model->normal[ level ], model->invArea[ level ], model->equal1[ level ] == 1);
 }
 
 void nextMaxLoc(const cv::Point &pos, const cv::Size templateSize, const double maxOverlap,
@@ -398,8 +398,9 @@ void filterOverlap(std::vector<Candidate> &candidates, const std::vector<cv::Rot
                         continue;
                     }
 
-                    const auto area    = cv::contourArea(points);
-                    const auto overlap = area / rect.size.area();
+                    const auto area = cv::contourArea(points);
+                    const auto overlap =
+                        area / static_cast<double>(rect.size.width * rect.size.height);
                     if (overlap > maxOverlap) {
                         (candidate.score > refCandidate.score ? refCandidate.score
                                                               : candidate.score) = INVALID;
