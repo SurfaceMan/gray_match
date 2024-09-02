@@ -9,37 +9,6 @@ constexpr double TOLERANCE = 0.0000001;
 constexpr int    CANDIDATE = 5;
 constexpr double INVALID   = -1.;
 
-struct Model {
-    std::vector<cv::Mat>    pyramids;
-    std::vector<cv::Scalar> mean;
-    std::vector<double>     normal;
-    std::vector<double>     invArea;
-    std::vector<bool>       equal1;
-    uchar                   borderColor = 0;
-
-    void clear() {
-        pyramids.clear();
-        normal.clear();
-        invArea.clear();
-        mean.clear();
-        equal1.clear();
-    }
-
-    void resize(const std::size_t size) {
-        normal.resize(size);
-        invArea.resize(size);
-        mean.resize(size);
-        equal1.resize(size);
-    }
-
-    void reserve(const std::size_t size) {
-        normal.reserve(size);
-        invArea.reserve(size);
-        mean.reserve(size);
-        equal1.reserve(size);
-    }
-};
-
 struct BlockMax {
     struct Block {
         cv::Rect  rect;
@@ -170,13 +139,14 @@ struct Template {
     cv::Mat         img;
     Region          region;
     cv::RotatedRect rect;
+
+    double mean    = 0;
+    double normal  = 0;
+    double invArea = 0;
 };
 
 struct Layer {
     double angleStep = 0;
-    double mean      = 0;
-    double normal    = 0;
-    double invArea   = 0;
 
     std::vector<Template> templates;
 };
@@ -212,6 +182,29 @@ inline void RotatedRectPoints(const cv::RotatedRect &rect, std::vector<cv::Point
 }
 
 inline cv::Rect boundingRect(const cv::RotatedRect &rect) {
+    auto angle = rect.angle;
+    if (angle > 360) {
+        angle -= 360;
+    } else if (angle < 0) {
+        angle += 360;
+    }
+
+    if (fabs(fabs(angle) - 90) < TOLERANCE || fabs(fabs(angle) - 270) < TOLERANCE) {
+        auto halfWidth  = rect.size.height / 2.;
+        auto halfHeight = rect.size.width / 2;
+        auto x          = rect.center.x - halfWidth;
+        auto y          = rect.center.y - halfHeight;
+        return {cvFloor(x), cvFloor(y), cvCeil(rect.size.height), cvCeil(rect.size.width)};
+    }
+
+    if (fabs(angle) < TOLERANCE || fabs(fabs(angle) - 180) < TOLERANCE) {
+        auto halfWidth  = rect.size.width / 2.;
+        auto halfHeight = rect.size.height / 2;
+        auto x          = rect.center.x - halfWidth;
+        auto y          = rect.center.y - halfHeight;
+        return {cvFloor(x), cvFloor(y), cvCeil(rect.size.width), cvCeil(rect.size.height)};
+    }
+
     cv::Point2f pt[ 4 ];
     RotatedRectPoints(rect, pt);
     cv::Rect r(cvFloor(std::min(std::min(std::min(pt[ 0 ].x, pt[ 1 ].x), pt[ 2 ].x), pt[ 3 ].x)),
@@ -288,64 +281,6 @@ cv::Rect2d boundingRect(const std::vector<cv::Point2d> &points) {
     }
 
     return {min, max};
-}
-
-cv::Size computeRotationSize(const cv::Size &dstSize, const cv::Size &templateSize, double angle,
-                             const cv::Mat &rotate) {
-    if (angle > 360) {
-        angle -= 360;
-    } else if (angle < 0) {
-        angle += 360;
-    }
-
-    if (fabs(fabs(angle) - 90) < TOLERANCE || fabs(fabs(angle) - 270) < TOLERANCE) {
-        return {dstSize.height, dstSize.width};
-    }
-
-    if (fabs(angle) < TOLERANCE || fabs(fabs(angle) - 180) < TOLERANCE) {
-        return dstSize;
-    }
-
-    const std::vector<cv::Point2d> points{
-        {0, 0},
-        {static_cast<double>(dstSize.width) - 1, 0},
-        {0, static_cast<double>(dstSize.height) - 1},
-        {static_cast<double>(dstSize.width) - 1, static_cast<double>(dstSize.height) - 1}};
-    std::vector<cv::Point2d> trans;
-    cv::transform(points, trans, rotate);
-    const auto rect = boundingRect(trans);
-    const auto max  = rect.br();
-    const auto min  = rect.tl();
-
-    if (angle > 0 && angle < 90) {
-        ;
-    } else if (angle > 90 && angle < 180) {
-        angle -= 90;
-    } else if (angle > 180 && angle < 270) {
-        angle -= 180;
-    } else if (angle > 270 && angle < 360) {
-        angle -= 270;
-    }
-
-    const auto radius = angle / 180. * CV_PI;
-    const auto dy     = sin(radius);
-    const auto dx     = cos(radius);
-    const auto width  = templateSize.width * dx * dy;
-    const auto height = templateSize.height * dx * dy;
-
-    const auto center     = sizeCenter(dstSize);
-    const auto halfHeight = static_cast<int>(ceil(max.y - center.y - width));
-    const auto halfWidth  = static_cast<int>(ceil(max.x - center.x - height));
-
-    cv::Size   size(halfWidth * 2, halfHeight * 2);
-    const auto wrongSize = (templateSize.width < size.width && templateSize.height > size.height) ||
-                           (templateSize.width > size.width && templateSize.height < size.height) ||
-                           templateSize.area() > size.area();
-    if (wrongSize) {
-        size = {static_cast<int>(max.x - min.x + 0.5), static_cast<int>(max.y - min.y + 0.5)};
-    }
-
-    return size;
 }
 
 void coeffDenominator(const cv::Mat &src, const cv::Size &templateSize, cv::Mat &result,
@@ -504,27 +439,17 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const Reg
     }
 }
 
-void matchTemplate(const cv::Mat &src, cv::Mat &result, const Template &layerTemplate,
-                   const double mean, const double normal, const double invArea) {
+void matchTemplate(const cv::Mat &src, cv::Mat &result, const Template &layerTemplate) {
     if (layerTemplate.region.empty()) {
         matchTemplateSimd(src, layerTemplate.img, result);
-        coeffDenominator(src, layerTemplate.img.size(), result, mean, normal, invArea, false);
+        coeffDenominator(src, layerTemplate.img.size(), result, layerTemplate.mean,
+                         layerTemplate.normal, layerTemplate.invArea, false);
     } else {
-        matchTemplateSimd(src, layerTemplate.img, layerTemplate.region, result, mean, normal,
-                          invArea);
+        matchTemplateSimd(src, layerTemplate.img, layerTemplate.region, result, layerTemplate.mean,
+                          layerTemplate.normal, layerTemplate.invArea);
     }
 }
 #endif
-
-void matchTemplate(cv::Mat &src, cv::Mat &result, const Model *model, int level) {
-#ifdef CV_SIMD
-    matchTemplateSimd(src, model->pyramids[ level ], result);
-#else
-    cv::matchTemplate(src, model->pyramids[ level ], result, cv::TM_CCORR);
-#endif
-    coeffDenominator(src, model->pyramids[ level ].size(), result, model->mean[ level ][ 0 ],
-                     model->normal[ level ], model->invArea[ level ], model->equal1[ level ]);
-}
 
 void nextMaxLoc(const cv::Point &pos, const cv::Size templateSize, const double maxOverlap,
                 BlockMax &block, double &maxScore, cv::Point &maxPos) {
@@ -540,21 +465,6 @@ void nextMaxLoc(const cv::Point &pos, const cv::Size templateSize, const double 
 
     block.update(rectIgnore);
     block.maxValueLoc(maxScore, maxPos);
-}
-
-void nextMaxLoc(cv::Mat &score, const cv::Point &pos, const cv::Size templateSize,
-                const double maxOverlap, double &maxScore, cv::Point &maxPos) {
-    const auto      alone = 1. - maxOverlap;
-    const cv::Point offset(static_cast<int>(templateSize.width * alone),
-                           static_cast<int>(templateSize.height * alone));
-    const cv::Size  size(static_cast<int>(2 * templateSize.width * alone),
-                         static_cast<int>(2 * templateSize.height * alone));
-    const cv::Rect  rectIgnore(pos - offset, size);
-
-    // clear neighbor
-    cv::rectangle(score, rectIgnore, cv::Scalar(-1), cv::FILLED);
-
-    cv::minMaxLoc(score, nullptr, &maxScore, nullptr, &maxPos);
 }
 
 void nextMaxLoc(cv::Mat &score, const cv::Point &pos, const cv::RotatedRect &rect,
@@ -575,17 +485,6 @@ void nextMaxLoc(cv::Mat &score, const cv::Point &pos, const cv::RotatedRect &rec
                        cv::Scalar(0));
 
     cv::minMaxLoc(score, nullptr, &maxScore, nullptr, &maxPos);
-}
-
-void cropRotatedRoi(const cv::Mat &src, const cv::Size &templateSize, const cv::Point2d topLeft,
-                    const cv::Mat &rotate, cv::Mat &roi) {
-    const auto     point = transform(topLeft, rotate);
-    const cv::Size paddingSize(templateSize.width + 6, templateSize.height + 6);
-    auto           rt    = rotate;
-    rt.at<double>(0, 2) -= point.x - 3;
-    rt.at<double>(1, 2) -= point.y - 3;
-
-    cv::warpAffine(src, roi, rt, paddingSize);
 }
 
 void filterOverlap(std::vector<Candidate> &candidates, const std::vector<cv::RotatedRect> &rects,
@@ -656,12 +555,6 @@ Region borderRegion(const cv::Mat &src) {
             }
 
             rle.length++;
-            if (0 != ptr[ x - 1 ]) {
-                continue;
-            }
-
-            rle.length = x - rle.startColumn + 1;
-            break;
         }
 
         if (inside) {
@@ -670,6 +563,15 @@ Region borderRegion(const cv::Mat &src) {
     }
 
     return result;
+}
+
+int regionArea(const Region &region) {
+    int area = 0;
+    for (const auto &rle : region) {
+        area += rle.length;
+    }
+
+    return area;
 }
 
 void drawRegion(cv::Mat &src, const Region &region) {
@@ -733,23 +635,10 @@ Model2 *trainModel(const cv::Mat &src, int level, double startAngle, double span
     cv::buildPyramid(src, pyramids, level - 1);
     for (int i = 0; i < level; i++) {
         const auto &pyramid = pyramids[ i ];
-        cv::Scalar  mean;
-        cv::Scalar  stdDev;
-        cv::meanStdDev(pyramid, mean, stdDev);
-        const auto &stdDevVal    = stdDev[ 0 ];
-        const auto  stdNormal    = stdDevVal * stdDevVal;
-        auto        noDifference = stdNormal < 1.;
-        if (noDifference) {
-            // all same grey value
-            break;
-        }
 
         const auto area = pyramid.size().area();
         Layer      layer;
-        layer.invArea   = 1. / area;
-        layer.normal    = stdDevVal / sqrt(layer.invArea);
         layer.angleStep = angleStep * (1 << i);
-        layer.mean      = mean[ 0 ];
 
         auto count  = static_cast<int>(ceil(spanAngle / layer.angleStep)) + 1;
         auto center = sizeCenter(pyramid.size());
@@ -775,20 +664,38 @@ Model2 *trainModel(const cv::Mat &src, int level, double startAngle, double span
             // if background area less than 1 percent, just match rotated image
             auto rate = static_cast<double>(area) / rect.size().area();
             if (rate > 0.9) {
+                cv::Scalar mean;
+                cv::Scalar stdDev;
+                cv::meanStdDev(rotated, mean, stdDev);
+                const auto &stdDevVal = stdDev[ 0 ];
+
+                layerTemplate.invArea = 1. / rotate.size().area();
+                layerTemplate.normal  = stdDevVal / sqrt(layerTemplate.invArea);
+                layerTemplate.mean    = mean[ 0 ];
+
                 layer.templates.emplace_back(std::move(layerTemplate));
                 continue;
             }
 
-            cv::Point2f trans[ 4 ];
-            RotatedRectPoints(layerTemplate.rect, trans);
+            cv::Point2f pts[ 4 ];
+            RotatedRectPoints(layerTemplate.rect, pts);
             cv::Mat roi = cv::Mat::zeros(rect.size(), CV_8UC1);
-            cv::line(roi, trans[ 0 ], trans[ 1 ], 255, 1, cv::LINE_8);
-            cv::line(roi, trans[ 1 ], trans[ 2 ], 255, 1, cv::LINE_8);
-            cv::line(roi, trans[ 2 ], trans[ 3 ], 255, 1, cv::LINE_8);
-            cv::line(roi, trans[ 3 ], trans[ 0 ], 255, 1, cv::LINE_8);
+            cv::fillConvexPoly(roi,
+                               std::vector<cv::Point>{cv::Point(pts[ 0 ]), cv::Point(pts[ 1 ]),
+                                                      cv::Point(pts[ 2 ]), cv::Point(pts[ 3 ])},
+                               cv::Scalar(255));
 
             // draw rotated rect line, then encode with run-length-encode
             layerTemplate.region = borderRegion(roi);
+
+            cv::Scalar mean;
+            cv::Scalar stdDev;
+            cv::meanStdDev(rotated, mean, stdDev, roi);
+            const auto &stdDevVal = stdDev[ 0 ];
+
+            layerTemplate.invArea = 1. / regionArea(layerTemplate.region);
+            layerTemplate.normal  = stdDevVal / sqrt(layerTemplate.invArea);
+            layerTemplate.mean    = mean[ 0 ];
 
             layer.templates.emplace_back(std::move(layerTemplate));
         }
@@ -797,7 +704,7 @@ Model2 *trainModel(const cv::Mat &src, int level, double startAngle, double span
     }
 
     if (!model.layers.empty()) {
-        model.borderColor = model.layers.front().mean > 128 ? 0 : 255;
+        model.borderColor = model.layers.front().templates.front().mean > 128 ? 0 : 255;
     }
 
     return result;
@@ -820,7 +727,7 @@ std::vector<Candidate> matchTopLevel(const cv::Mat &dstTop, const Layer &layer,
         const auto &layerTemplate = layer.templates[ startIndex + i ];
 
         cv::Mat result;
-        matchTemplate(dstTop, result, layerTemplate, layer.mean, layer.normal, layer.invArea);
+        matchTemplate(dstTop, result, layerTemplate);
 
         if (calMaxByBlock) {
             BlockMax  block(result, layerTemplate.img.size());
@@ -924,7 +831,7 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
 
                 cv::Mat result;
                 cv::Mat roi = currentDstImg(rect);
-                matchTemplate(roi, result, layerTemplate, layer.mean, layer.normal, layer.invArea);
+                matchTemplate(roi, result, layerTemplate);
 
                 double    maxScore;
                 cv::Point maxPos;
@@ -1030,235 +937,28 @@ std::vector<Pose> matchModel(const cv::Mat &dst, const Model2 *model, int level,
         return {};
     }
 
-    return {};
-}
-
-std::vector<Candidate> matchTopLevel(const cv::Mat &dstTop, double startAngle, double spanAngle,
-                                     double maxOverlap, double minScore, int maxCount,
-                                     const Model *model, int level) {
-    std::vector<Candidate> candidates;
-
-    const auto &templateTop       = model->pyramids[ level ];
-    auto        angleStep         = sizeAngleStep(templateTop.size());
-    cv::Point2d center            = sizeCenter(dstTop.size());
-    const auto  topScoreThreshold = minScore * pow(0.9, level);
-    bool calMaxByBlock = (dstTop.size().area() / templateTop.size().area() > 500) && maxCount > 10;
-
-    const auto count = static_cast<int>(spanAngle / angleStep) + 1;
-    for (int i = 0; i < count; i++) {
-        const auto angle  = startAngle + angleStep * i;
-        auto       rotate = cv::getRotationMatrix2D(center, angle, 1.);
-        auto       size   = computeRotationSize(dstTop.size(), templateTop.size(), angle, rotate);
-
-        auto tx                  = (size.width - 1) / 2. - center.x;
-        auto ty                  = (size.height - 1) / 2. - center.y;
-        rotate.at<double>(0, 2) += tx;
-        rotate.at<double>(1, 2) += ty;
-        cv::Point2d offset(tx, ty);
-
-        cv::Mat rotated;
-        cv::warpAffine(dstTop, rotated, rotate, size, cv::INTER_LINEAR, cv::BORDER_CONSTANT,
-                       model->borderColor);
-
-        cv::Mat result;
-        matchTemplate(rotated, result, model, level);
-        if (calMaxByBlock) {
-            BlockMax  block(result, templateTop.size());
-            double    maxScore;
-            cv::Point maxPos;
-            block.maxValueLoc(maxScore, maxPos);
-            if (maxScore < topScoreThreshold) {
-                continue;
-            }
-
-            candidates.emplace_back(cv::Point2d(maxPos) - offset, angle, maxScore);
-            for (int j = 0; j < maxCount + CANDIDATE - 1; j++) {
-                nextMaxLoc(maxPos, templateTop.size(), maxOverlap, block, maxScore, maxPos);
-                if (maxScore < topScoreThreshold) {
-                    break;
-                }
-
-                candidates.emplace_back(cv::Point2d(maxPos) - offset, angle, maxScore);
-            }
-        } else {
-            double    maxScore;
-            cv::Point maxPos;
-            cv::minMaxLoc(result, nullptr, &maxScore, nullptr, &maxPos);
-            if (maxScore < topScoreThreshold) {
-                continue;
-            }
-
-            candidates.emplace_back(cv::Point2d(maxPos) - offset, angle, maxScore);
-            for (int j = 0; j < maxCount + CANDIDATE - 1; j++) {
-                nextMaxLoc(result, maxPos, templateTop.size(), maxOverlap, maxScore, maxPos);
-                if (maxScore < topScoreThreshold) {
-                    break;
-                }
-
-                candidates.emplace_back(cv::Point2d(maxPos) - offset, angle, maxScore);
-            }
-        }
-    }
-
-    std::sort(candidates.begin(), candidates.end());
-
-    return candidates;
-}
-
-std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
-                                      const std::vector<Candidate> &candidates, double minScore,
-                                      int subpixel, const Model *model, int level) {
-    std::vector<Candidate> levelMatched;
-
-    for (const auto &candidate : candidates) {
-        auto pose    = candidate;
-        bool matched = true;
-        for (int currentLevel = level - 1; currentLevel >= 0; currentLevel--) {
-            const auto &currentTemplateImg = model->pyramids[ currentLevel ];
-            const auto  tmpSize            = currentTemplateImg.size();
-
-            const auto &currentDstImg = pyramids[ currentLevel ];
-            const auto  dstSize       = currentDstImg.size();
-
-            auto currentAngleStep = sizeAngleStep(tmpSize);
-            auto center           = sizeCenter(dstSize);
-
-            const auto lastSize   = pyramids[ currentLevel + 1 ].size();
-            auto       lastCenter = sizeCenter(lastSize);
-            auto       topLeft    = transform(pose.pos, lastCenter, -pose.angle) * 2;
-
-            const auto scoreThreshold = minScore * pow(0.9, currentLevel);
-
-            Candidate newCandidate;
-            cv::Mat   newScoreRect;
-            for (int i = -1; i <= 1; i++) {
-                auto angle  = pose.angle + i * currentAngleStep;
-                auto rotate = cv::getRotationMatrix2D(center, angle, 1.);
-
-                cv::Mat roi;
-                cropRotatedRoi(currentDstImg, tmpSize, topLeft, rotate, roi);
-
-                cv::Mat result;
-                matchTemplate(roi, result, model, currentLevel);
-
-                double    maxScore;
-                cv::Point maxPos;
-                cv::minMaxLoc(result, nullptr, &maxScore, nullptr, &maxPos);
-
-                if (newCandidate.score >= maxScore || maxScore < scoreThreshold) {
-                    continue;
-                }
-
-                newCandidate = {cv::Point2d(maxPos), angle, maxScore};
-                if (0 == currentLevel && 1 == subpixel) {
-                    auto isBorder = 0 == maxPos.x || 0 == maxPos.y || result.cols - 1 == maxPos.x ||
-                                    result.rows - 1 == maxPos.y;
-                    newScoreRect = isBorder
-                                       ? cv::Mat()
-                                       : result(cv::Rect(maxPos - cv::Point{1, 1}, cv::Size(3, 3)));
-                }
-            }
-
-            if (newCandidate.score < scoreThreshold) {
-                matched = false;
-                break;
-            }
-
-            if (!newScoreRect.empty()) {
-                // TODO subpixel
-            }
-
-            // back to
-            auto paddingTopLeft =
-                transform(topLeft, center, newCandidate.angle) - cv::Point2d(3, 3);
-            newCandidate.pos += paddingTopLeft;
-
-            pose = newCandidate;
-        }
-
-        if (!matched) {
-            continue;
-        }
-
-        const auto lastSize   = pyramids.front().size();
-        auto       lastCenter = sizeCenter(lastSize);
-        pose.pos              = transform(pose.pos, lastCenter, -pose.angle);
-
-        levelMatched.push_back(pose);
-    }
-    std::sort(levelMatched.begin(), levelMatched.end());
-
-    return levelMatched;
-}
-
-std::vector<Pose> matchModel(const cv::Mat &dst, const Model *model, int level,
-                             const double startAngle, const double spanAngle,
-                             const double maxOverlap, const double minScore, const int maxCount,
-                             const int subpixel) {
-    // prepare
-    {
-        if (dst.empty() || nullptr == model) {
-            return {};
-        }
-
-        auto &templateImg = model->pyramids.front();
-        if (dst.cols < templateImg.cols || dst.rows < templateImg.rows ||
-            dst.size().area() < templateImg.size().area()) {
-            return {};
-        }
-
-        const auto templateLevel = static_cast<int>(model->pyramids.size() - 1);
-        if (level < 0 || level > templateLevel) {
-            // level must greater than 1
-            level = templateLevel;
-        }
-    }
-
-    std::vector<cv::Mat> pyramids;
-    cv::buildPyramid(dst, pyramids, level);
-
-    // compute top
-    const std::vector<Candidate> candidates = matchTopLevel(
-        pyramids.back(), startAngle, spanAngle, maxOverlap, minScore, maxCount, model, level);
-
-    // match candidate each level
-    std::vector<Candidate> levelMatched =
-        matchDownLevel(pyramids, candidates, minScore, subpixel, model, level);
-
     // filter overlap
     std::vector<cv::RotatedRect> rects;
     {
         rects.reserve(levelMatched.size());
-        const auto        size = model->pyramids.front().size();
-        const cv::Point2f topRight(static_cast<float>(size.width), 0.f);
-        const cv::Point2f bottomRight(static_cast<float>(size.width),
-                                      static_cast<float>(size.height));
+        const auto size = model->source.size();
         for (const auto &candidate : levelMatched) {
-            std::vector<cv::Point2f> points{topRight + cv::Point2f(candidate.pos),
-                                            bottomRight + cv::Point2f(candidate.pos)};
-            auto rotate = cv::getRotationMatrix2D(candidate.pos, -candidate.angle, 1.);
-            std::vector<cv::Point2f> rotatedPoints;
-            cv::transform(points, rotatedPoints, rotate);
-
-            rects.emplace_back(cv::Point2f(candidate.pos), rotatedPoints[ 0 ], rotatedPoints[ 1 ]);
+            rects.emplace_back(cv::Point2f(candidate.pos), cv::Size2f(size),
+                               static_cast<float>(candidate.angle));
         }
         filterOverlap(levelMatched, rects, maxOverlap);
     }
 
     std::vector<Pose> result;
     {
-        const auto count = levelMatched.size();
-        for (std::size_t i = 0; i < count; i++) {
-            const auto &candidate = levelMatched[ i ];
-            const auto &rect      = rects[ i ];
-
+        for (const auto &candidate : levelMatched) {
             if (candidate.score < 0) {
                 continue;
             }
 
-            const auto &center = rect.center;
-            result.emplace_back(Pose{center.x, center.y, static_cast<float>(-candidate.angle),
-                                     static_cast<float>(candidate.score)});
+            result.emplace_back(
+                Pose{static_cast<float>(candidate.pos.x), static_cast<float>(candidate.pos.y),
+                     static_cast<float>(candidate.angle), static_cast<float>(candidate.score)});
         }
 
         std::sort(result.begin(), result.end(),
