@@ -311,24 +311,21 @@ void coeffDenominator(const cv::Mat &src, const cv::Size &templateSize, cv::Mat 
         auto *scorePtr = result.ptr<float>(y);
         auto  idx      = y * step;
         for (int x = 0; x < result.cols; x++, idx++) {
-            auto      &score    = scorePtr[ x ];
-            const auto partSum  = p0[ idx ] - p1[ idx ] - p2[ idx ] + p3[ idx ];
-            auto       partMean = partSum * partSum * invArea;
-            const auto num      = score - partSum * mean;
+            auto      &score     = scorePtr[ x ];
+            const auto partSum   = p0[ idx ] - p1[ idx ] - p2[ idx ] + p3[ idx ];
+            const auto numerator = score - partSum * mean;
 
-            auto partSum2 = q0[ idx ] - q1[ idx ] - q2[ idx ] + q3[ idx ];
+            auto partSqSum    = q0[ idx ] - q1[ idx ] - q2[ idx ] + q3[ idx ];
+            auto partSqNormal = partSqSum - partSum * partSum * invArea;
 
-            const auto diff = std::max(partSum2 - partMean, 0.);
-            if (diff <= std::min(0.5, 10 * FLT_EPSILON * partSum2)) {
-                partSum2 = 0;
-            } else {
-                partSum2 = sqrt(diff) * normal;
-            }
+            const auto diff = std::max(partSqNormal, 0.);
+            double     denominator =
+                (diff <= std::min(0.5, 10 * FLT_EPSILON * partSqSum)) ? 0 : sqrt(diff) * normal;
 
-            if (abs(num) < partSum2) {
-                score = static_cast<float>(num / partSum2);
-            } else if (abs(num) < partSum2 * 1.125) {
-                score = num > 0.f ? 1.f : -1.f;
+            if (abs(numerator) < denominator) {
+                score = static_cast<float>(numerator / denominator);
+            } else if (abs(numerator) < denominator * 1.125) {
+                score = numerator > 0.f ? 1.f : -1.f;
             } else {
                 score = 0;
             }
@@ -411,21 +408,19 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const Reg
                 computeLine(temPtr, srcPtr, rle.length, dot, sum, sqSum);
             }
 
-            const auto partMean = static_cast<double>(sum * sum) * invArea;
-            const auto num      = static_cast<double>(dot) - static_cast<double>(sum) * mean;
+            const auto numerator = static_cast<double>(dot) - static_cast<double>(sum) * mean;
 
-            auto       fsqSum = static_cast<double>(sqSum);
-            const auto diff   = std::max(fsqSum - partMean, 0.);
-            if (diff <= std::min(0.5, 10 * FLT_EPSILON * fsqSum)) {
-                fsqSum = 0;
-            } else {
-                fsqSum = sqrt(diff) * normal;
-            }
+            auto       fsqSum       = static_cast<double>(sqSum);
+            const auto partSqNormal = fsqSum - static_cast<double>(sum * sum) * invArea;
 
-            if (abs(num) < fsqSum) {
-                score = static_cast<float>(num / fsqSum);
-            } else if (abs(num) < fsqSum * 1.125) {
-                score = num > 0.f ? 1.f : -1.f;
+            const auto diff = std::max(partSqNormal, 0.);
+            auto       denominator =
+                (diff <= std::min(0.5, 10 * FLT_EPSILON * fsqSum)) ? 0 : sqrt(diff) * normal;
+
+            if (abs(numerator) < denominator) {
+                score = static_cast<float>(numerator / denominator);
+            } else if (abs(numerator) < denominator * 1.125) {
+                score = numerator > 0.f ? 1.f : -1.f;
             } else {
                 score = 0;
             }
