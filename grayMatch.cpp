@@ -403,7 +403,7 @@ void coeffDenominator(const cv::Mat &src, const cv::Size &templateSize, cv::Mat 
 
 #ifdef CV_SIMD
 float convSimd(const uchar *kernel, const uchar *src, const int kernelWidth) {
-    const auto blockSize = cv::VTraits<cv::v_uint8>::vlanes();
+    const auto blockSize = cv::v_uint8::nlanes;
     auto       vSum      = cv::vx_setall_u32(0);
     int        i         = 0;
     for (; i < kernelWidth - blockSize; i += blockSize) {
@@ -420,7 +420,7 @@ float convSimd(const uchar *kernel, const uchar *src, const int kernelWidth) {
 
 void computeLine(const uchar *kernel, const uchar *src, const int kernelWidth, uint64_t &dot,
                  uint64_t &sum, uint64_t &sqSum) {
-    const auto blockSize = cv::VTraits<cv::v_uint8>::vlanes();
+    const auto blockSize = cv::v_uint8::nlanes;
     auto       vDot      = cv::vx_setall_u32(0);
     auto       vsqSum    = cv::vx_setall_u32(0);
     int        i         = 0;
