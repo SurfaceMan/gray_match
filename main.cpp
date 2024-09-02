@@ -7,7 +7,7 @@ int main() {
     auto src =
         cv::imread("C:/Users/qiuyong/Desktop/test/template/model3.bmp", cv::IMREAD_GRAYSCALE);
     auto dst =
-        cv::imread("C:/Users/qiuyong/Desktop/test/template/model3_src3.bmp", cv::IMREAD_GRAYSCALE);
+        cv::imread("C:/Users/qiuyong/Desktop/test/template/model3_src2.bmp", cv::IMREAD_GRAYSCALE);
     if (src.empty() || dst.empty()) {
         return -1;
     }

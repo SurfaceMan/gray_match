@@ -151,7 +151,7 @@ struct Layer {
     std::vector<Template> templates;
 };
 
-struct Model2 {
+struct Model {
     double startAngle  = 0;
     double stopAngle   = 0;
     double angleStep   = 0;
@@ -432,11 +432,11 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const Reg
         }
     }
 
-    auto mat = templateImg;
-    drawRegion(mat, region);
-    if (!mat.empty()) {
-        return;
-    }
+    // auto mat = templateImg;
+    // drawRegion(mat, region);
+    // if (!mat.empty()) {
+    //     return;
+    // }
 }
 
 void matchTemplate(const cv::Mat &src, cv::Mat &result, const Template &layerTemplate) {
@@ -445,8 +445,19 @@ void matchTemplate(const cv::Mat &src, cv::Mat &result, const Template &layerTem
         coeffDenominator(src, layerTemplate.img.size(), result, layerTemplate.mean,
                          layerTemplate.normal, layerTemplate.invArea, false);
     } else {
-        matchTemplateSimd(src, layerTemplate.img, layerTemplate.region, result, layerTemplate.mean,
-                          layerTemplate.normal, layerTemplate.invArea);
+        // matchTemplateSimd(src, layerTemplate.img, layerTemplate.region, result,
+        // layerTemplate.mean,
+        //                   layerTemplate.normal, layerTemplate.invArea);
+
+        cv::Point2f pts[ 4 ];
+        RotatedRectPoints(layerTemplate.rect, pts);
+        cv::Mat roi = cv::Mat::zeros(layerTemplate.img.size(), CV_8UC1);
+        cv::fillConvexPoly(roi,
+                           std::vector<cv::Point>{cv::Point(pts[ 0 ]), cv::Point(pts[ 1 ]),
+                                                  cv::Point(pts[ 2 ]), cv::Point(pts[ 3 ])},
+                           cv::Scalar(255));
+
+        cv::matchTemplate(src, layerTemplate.img, result, cv::TM_CCOEFF_NORMED, roi);
     }
 }
 #endif
@@ -591,8 +602,8 @@ double normalizeAngle(const double angle) {
     return angle - k * 360.0;
 }
 
-Model2 *trainModel(const cv::Mat &src, int level, double startAngle, double spanAngle,
-                   double angleStep) {
+Model *trainModel(const cv::Mat &src, int level, double startAngle, double spanAngle,
+                  double angleStep) {
     if (src.empty() || src.channels() != 1) {
         return nullptr;
     }
@@ -624,8 +635,8 @@ Model2 *trainModel(const cv::Mat &src, int level, double startAngle, double span
     startAngle  = normalizeAngle(startAngle);
     auto nAngle = static_cast<int>(ceil(spanAngle / angleStep));
 
-    auto   *result   = new Model2;
-    Model2 &model    = *result;
+    auto  *result    = new Model;
+    Model &model     = *result;
     model.startAngle = startAngle;
     model.angleStep  = angleStep;
     model.stopAngle  = startAngle + angleStep * nAngle;
@@ -636,8 +647,10 @@ Model2 *trainModel(const cv::Mat &src, int level, double startAngle, double span
     for (int i = 0; i < level; i++) {
         const auto &pyramid = pyramids[ i ];
 
-        const auto area = pyramid.size().area();
-        Layer      layer;
+        // auto border = cv::mean(pyramid)[ 0 ] > 128 ? 0 : 255;
+
+        // const auto area = pyramid.size().area();
+        Layer layer;
         layer.angleStep = angleStep * (1 << i);
 
         auto count  = static_cast<int>(ceil(spanAngle / layer.angleStep)) + 1;
@@ -656,26 +669,26 @@ Model2 *trainModel(const cv::Mat &src, int level, double startAngle, double span
             rotate.at<double>(1, 2) += offset.y;
 
             auto &rotated = layerTemplate.img;
-            cv::warpAffine(pyramid, rotated, rotate, rect.size(), cv::INTER_LINEAR,
+            cv::warpAffine(pyramid, rotated, rotate, rect.size(), cv::INTER_CUBIC,
                            cv::BORDER_DEFAULT);
 
             layerTemplate.rect.center = newCenter;
 
             // if background area less than 1 percent, just match rotated image
-            auto rate = static_cast<double>(area) / rect.size().area();
-            if (rate > 0.9) {
-                cv::Scalar mean;
-                cv::Scalar stdDev;
-                cv::meanStdDev(rotated, mean, stdDev);
-                const auto &stdDevVal = stdDev[ 0 ];
-
-                layerTemplate.invArea = 1. / rotate.size().area();
-                layerTemplate.normal  = stdDevVal / sqrt(layerTemplate.invArea);
-                layerTemplate.mean    = mean[ 0 ];
-
-                layer.templates.emplace_back(std::move(layerTemplate));
-                continue;
-            }
+            // auto rate = static_cast<double>(area) / rect.size().area();
+            // if (rate > 0.9) {
+            //    cv::Scalar mean;
+            //    cv::Scalar stdDev;
+            //    cv::meanStdDev(rotated, mean, stdDev);
+            //    const auto &stdDevVal = stdDev[ 0 ];
+            //
+            //    layerTemplate.invArea = 1. / rotated.size().area();
+            //    layerTemplate.normal  = stdDevVal / sqrt(layerTemplate.invArea);
+            //    layerTemplate.mean    = mean[ 0 ];
+            //
+            //    layer.templates.emplace_back(std::move(layerTemplate));
+            //    continue;
+            //}
 
             cv::Point2f pts[ 4 ];
             RotatedRectPoints(layerTemplate.rect, pts);
@@ -783,8 +796,8 @@ std::vector<Candidate> matchTopLevel(const cv::Mat &dstTop, const Layer &layer,
 std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
                                       const double                  modelAngleStart,
                                       const std::vector<Candidate> &candidates,
-                                      const double minScore, const int subpixel,
-                                      const Model2 *model, int level) {
+                                      const double minScore, const int subpixel, const Model *model,
+                                      int level) {
     std::vector<Candidate> levelMatched;
 
     for (const auto &candidate : candidates) {
@@ -879,7 +892,7 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
     return levelMatched;
 }
 
-std::vector<Pose> matchModel(const cv::Mat &dst, const Model2 *model, int level, double startAngle,
+std::vector<Pose> matchModel(const cv::Mat &dst, const Model *model, int level, double startAngle,
                              double spanAngle, const double maxOverlap, const double minScore,
                              const int maxCount, const int subpixel) {
     (void)(subpixel);
