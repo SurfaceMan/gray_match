@@ -141,6 +141,15 @@ int computeLayers(const int width, const int height, const int minArea) {
     return layer;
 }
 
+inline cv::Point2d transform(const cv::Point2d &point, const cv::Mat &rotate) {
+    const auto ptr = rotate.ptr<double>();
+
+    auto x = point.x * ptr[ 0 ] + point.y * ptr[ 1 ] + ptr[ 2 ];
+    auto y = point.x * ptr[ 3 ] + point.y * ptr[ 4 ] + ptr[ 5 ];
+
+    return {x, y};
+}
+
 cv::Size computeRotationSize(const cv::Size &dstSize, const cv::Size &templateSize, double angle,
                              const cv::Mat &rotate) {
     if (angle > 360) {
@@ -157,22 +166,18 @@ cv::Size computeRotationSize(const cv::Size &dstSize, const cv::Size &templateSi
         return dstSize;
     }
 
-    const std::vector<cv::Point2d> points{
-        {0, 0},
-        {static_cast<double>(dstSize.width) - 1, 0},
-        {0, static_cast<double>(dstSize.height) - 1},
-        {static_cast<double>(dstSize.width) - 1, static_cast<double>(dstSize.height) - 1}};
-    std::vector<cv::Point2d> trans;
-    cv::transform(points, trans, rotate);
+    const std::vector<cv::Point2d> pt{
+        transform({0, 0}, rotate), transform({static_cast<double>(dstSize.width) - 1, 0}, rotate),
+        transform({0, static_cast<double>(dstSize.height) - 1}, rotate),
+        transform({static_cast<double>(dstSize.width) - 1, static_cast<double>(dstSize.height) - 1},
+                  rotate)};
 
-    cv::Point2d min = trans[ 0 ];
-    cv::Point2d max = trans[ 0 ];
-    for (const auto &point : trans) {
-        min.x = std::min(min.x, point.x);
-        min.y = std::min(min.y, point.y);
-        max.x = std::max(max.x, point.x);
-        max.y = std::max(max.y, point.y);
-    }
+    cv::Point2d min;
+    cv::Point2d max;
+    min.x = std::min(std::min(std::min(pt[ 0 ].x, pt[ 1 ].x), pt[ 2 ].x), pt[ 3 ].x);
+    min.y = std::min(std::min(std::min(pt[ 0 ].y, pt[ 1 ].y), pt[ 2 ].y), pt[ 3 ].y);
+    max.x = std::max(std::max(std::max(pt[ 0 ].x, pt[ 1 ].x), pt[ 2 ].x), pt[ 3 ].x);
+    max.y = std::max(std::max(std::max(pt[ 0 ].y, pt[ 1 ].y), pt[ 2 ].y), pt[ 3 ].y);
 
     if (angle > 0 && angle < 90) {
         ;
@@ -329,15 +334,6 @@ void nextMaxLoc(cv::Mat &score, const cv::Point &pos, const cv::Size templateSiz
     cv::rectangle(score, rectIgnore, cv::Scalar(-1), cv::FILLED);
 
     cv::minMaxLoc(score, nullptr, &maxScore, nullptr, &maxPos);
-}
-
-inline cv::Point2d transform(const cv::Point2d &point, const cv::Mat &rotate) {
-    const auto ptr = rotate.ptr<double>();
-
-    auto x = point.x * ptr[ 0 ] + point.y * ptr[ 1 ] + ptr[ 2 ];
-    auto y = point.x * ptr[ 3 ] + point.y * ptr[ 4 ] + ptr[ 5 ];
-
-    return {x, y};
 }
 
 inline cv::Point2d transform(const cv::Point2d &point, const cv::Point &center, double angle) {
