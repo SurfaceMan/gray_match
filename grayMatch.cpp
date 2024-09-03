@@ -585,6 +585,7 @@ Model *trainModel(const cv::Mat &src, int level, double startAngle, double spanA
 
             // draw rotated rect line, then encode with run-length-encode
             layerTemplate.region = borderRegion(roi);
+            cv::bitwise_and(rotated, roi, rotated);
 
             cv::Scalar mean;
             cv::Scalar stdDev;
