@@ -1,6 +1,8 @@
 #include "grayMatch.h"
 #include "privateType.h"
 
+#include <opencv2/core/hal/intrin.hpp>
+
 class Buffer {
 public:
     Buffer(int size_, unsigned char *data_)
@@ -140,8 +142,15 @@ public:
         memcpy(&height, m_data + m_size, sizeof(int));
         m_size += static_cast<int>(sizeof(int));
 
-        val     = cv::Mat(cv::Size(width, height), CV_8UC1, m_data + m_size);
-        m_size += width * height;
+        int  alignedWidth = static_cast<int>(cv::alignSize(width, cv::v_uint8::nlanes));
+        auto img          = cv::Mat::zeros(height, alignedWidth, CV_8UC1);
+        val               = img(cv::Rect(0, 0, width, height));
+
+        for (int y = 0; y < height; y++) {
+            auto *ptr = val.ptr<uchar>(y);
+            memcpy(ptr, m_data + m_size, width);
+            m_size += width;
+        }
     }
     void operator&(std::vector<cv::Scalar> &val) final {
         int count = 0;

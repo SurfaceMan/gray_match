@@ -260,20 +260,21 @@ float convSimd(const uchar *kernel, const uchar *src, const int kernelWidth) {
     const auto blockSize = cv::v_uint8::nlanes;
     auto       vSum      = cv::vx_setall_u32(0);
     int        i         = 0;
-    for (; i < kernelWidth - blockSize; i += blockSize) {
+    for (; i < kernelWidth; i += blockSize) {
         vSum += cv::v_dotprod_expand(cv::v_load(kernel + i), cv::v_load(src + i));
     }
     auto sum = cv::v_reduce_sum(vSum);
-
-    for (; i < kernelWidth; i++) {
-        sum += kernel[ i ] * src[ i ];
-    }
 
     return static_cast<float>(sum);
 }
 
 void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &result) {
     result = cv::Mat::zeros(src.size() - templateImg.size() + cv::Size(1, 1), CV_32FC1);
+
+    auto step = int(templateImg.step);
+    if (step < 0) {
+        return;
+    }
 
     for (int y = 0; y < result.rows; y++) {
         auto *resultPtr = result.ptr<float>(y);
