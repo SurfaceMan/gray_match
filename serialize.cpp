@@ -24,18 +24,13 @@ public:
         this->operator&(val.borderColor);
     }
 
-    int count() const {
+    [[nodiscard]] int count() const {
         return m_size;
     }
 
 protected:
     int            m_size = 0;
     unsigned char *m_data = nullptr;
-};
-
-class WriteOperationBase {
-public:
-    virtual void write(void *dst, void *src, int size) = 0;
 };
 
 void binWrite(void *dst, void *src, int size) {
@@ -52,7 +47,7 @@ using Write = void (*)(void *, void *, int);
 
 template <Write write> class OutBuffer : public Buffer {
 public:
-    OutBuffer(unsigned char *data_)
+    explicit OutBuffer(unsigned char *data_)
         : Buffer(0, data_) {}
 
     void operator&(uchar &val) final {
@@ -116,7 +111,7 @@ using WriteBuffer     = OutBuffer<binWrite>;
 
 class ReadBuffer : public Buffer {
 public:
-    ReadBuffer(unsigned char *data_)
+    explicit ReadBuffer(unsigned char *data_)
         : Buffer(0, data_) {}
 
     void operator&(uchar &val) final {
@@ -200,15 +195,15 @@ bool serialize(const Model_t model, unsigned char *buffer, int *size) {
         return false;
     }
 
-    SizeCountBuffer countor(buffer);
-    operation(&countor, *model);
-    *size = countor.count();
+    SizeCountBuffer counter(buffer);
+    operation(&counter, *model);
+    *size = counter.count();
 
     if (nullptr == buffer) {
         return true;
     }
 
-    if (countor.count() > *size) {
+    if (counter.count() > *size) {
         *size = 0;
         return false;
     }

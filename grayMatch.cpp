@@ -180,7 +180,6 @@ cv::Size computeRotationSize(const cv::Size &dstSize, const cv::Size &templateSi
     max.y = std::max(std::max(std::max(pt[ 0 ].y, pt[ 1 ].y), pt[ 2 ].y), pt[ 3 ].y);
 
     if (angle > 0 && angle < 90) {
-        ;
     } else if (angle > 90 && angle < 180) {
         angle -= 90;
     } else if (angle > 180 && angle < 270) {
@@ -703,7 +702,7 @@ std::vector<Pose> matchModel(const cv::Mat &dst, const Model *model, int level,
 
 Model_t trainModel(const unsigned char *data, int width, int height, int channels, int bytesPerline,
                    int roiLeft, int roiTop, int roiWidth, int roiHeight, int levelNum) {
-    if ((1 != channels && 3 == channels && 4 == channels) || nullptr == data) {
+    if ((1 != channels && 3 != channels && 4 != channels) || nullptr == data) {
         return nullptr;
     }
 

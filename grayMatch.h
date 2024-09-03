@@ -97,7 +97,7 @@ API_PUBLIC void freeModel(Model_t *model);
 API_PUBLIC bool serialize(const Model_t model, unsigned char *buffer, int *size);
 
 /**
- * @brief desrialize model
+ * @brief deserialize model
  * @param buffer
  * @param size buffer size
  * @return model
