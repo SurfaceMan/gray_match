@@ -1,8 +1,6 @@
 #include "grayMatch.h"
 
-// #include <complex.h>
-// #include <opencv2/core/hal/intrin.hpp>
-// #include <utility>
+#include <opencv2/core/hal/intrin.hpp>
 
 constexpr int    MIN_AREA  = 256;
 constexpr double TOLERANCE = 0.0000001;
@@ -137,7 +135,7 @@ using Region = std::vector<RLE>;
 
 struct Template {
     cv::Mat         img;
-    cv::Mat         mask;
+    Region          region;
     cv::RotatedRect rect;
 
     double mean    = 0;
@@ -162,9 +160,9 @@ struct Model {
 };
 
 inline void RotatedRectPoints(const cv::RotatedRect &rect, cv::Point2f pt[]) {
-    double _angle = -rect.angle * CV_PI / 180.;
-    float  b      = (float)cos(_angle) * 0.5f;
-    float  a      = (float)sin(_angle) * 0.5f;
+    const auto angle = -rect.angle * CV_PI / 180.;
+    const auto b     = static_cast<float>(cos(angle)) * 0.5f;
+    const auto a     = static_cast<float>(sin(angle)) * 0.5f;
 
     pt[ 0 ].x = rect.center.x - a * rect.size.height - b * rect.size.width;
     pt[ 0 ].y = rect.center.y + b * rect.size.height - a * rect.size.width;
@@ -190,18 +188,18 @@ inline cv::Rect boundingRect(const cv::RotatedRect &rect) {
     }
 
     if (fabs(fabs(angle) - 90) < TOLERANCE || fabs(fabs(angle) - 270) < TOLERANCE) {
-        auto halfWidth  = rect.size.height / 2.;
-        auto halfHeight = rect.size.width / 2;
-        auto x          = rect.center.x - halfWidth;
-        auto y          = rect.center.y - halfHeight;
+        const auto halfWidth  = rect.size.height / 2.;
+        const auto halfHeight = rect.size.width / 2;
+        const auto x          = rect.center.x - halfWidth;
+        const auto y          = rect.center.y - halfHeight;
         return {cvFloor(x), cvFloor(y), cvCeil(rect.size.height), cvCeil(rect.size.width)};
     }
 
     if (fabs(angle) < TOLERANCE || fabs(fabs(angle) - 180) < TOLERANCE) {
-        auto halfWidth  = rect.size.width / 2.;
-        auto halfHeight = rect.size.height / 2;
-        auto x          = rect.center.x - halfWidth;
-        auto y          = rect.center.y - halfHeight;
+        const auto halfWidth  = rect.size.width / 2.;
+        const auto halfHeight = rect.size.height / 2;
+        const auto x          = rect.center.x - halfWidth;
+        const auto y          = rect.center.y - halfHeight;
         return {cvFloor(x), cvFloor(y), cvCeil(rect.size.width), cvCeil(rect.size.height)};
     }
 
@@ -283,79 +281,14 @@ cv::Rect2d boundingRect(const std::vector<cv::Point2d> &points) {
     return {min, max};
 }
 
-void coeffDenominator(const cv::Mat &src, const cv::Size &templateSize, cv::Mat &result,
-                      const double mean, const double normal, const double invArea,
-                      const bool equal1) {
-    if (equal1) {
-        result = cv::Scalar::all(1);
-        return;
-    }
-
-    cv::Mat sum;
-    cv::Mat sqSum;
-    cv::integral(src, sum, sqSum, CV_64F);
-
-    const auto *q0 = sqSum.ptr<double>(0);
-    const auto *q1 = q0 + templateSize.width;
-    const auto *q2 = sqSum.ptr<double>(templateSize.height);
-    const auto *q3 = q2 + templateSize.width;
-
-    const auto *p0 = sum.ptr<double>(0);
-    const auto *p1 = p0 + templateSize.width;
-    const auto *p2 = sum.ptr<double>(templateSize.height);
-    const auto *p3 = p2 + templateSize.width;
-
-    const auto step = sum.step / sizeof(double);
-
-    for (int y = 0; y < result.rows; y++) {
-        auto *scorePtr = result.ptr<float>(y);
-        auto  idx      = y * step;
-        for (int x = 0; x < result.cols; x++, idx++) {
-            auto      &score     = scorePtr[ x ];
-            const auto partSum   = p0[ idx ] - p1[ idx ] - p2[ idx ] + p3[ idx ];
-            const auto numerator = score - partSum * mean;
-
-            auto partSqSum    = q0[ idx ] - q1[ idx ] - q2[ idx ] + q3[ idx ];
-            auto partSqNormal = partSqSum - partSum * partSum * invArea;
-
-            const auto diff = std::max(partSqNormal, 0.);
-            double     denominator =
-                (diff <= std::min(0.5, 10 * FLT_EPSILON * partSqSum)) ? 0 : sqrt(diff) * normal;
-
-            if (abs(numerator) < denominator) {
-                score = static_cast<float>(numerator / denominator);
-            } else if (abs(numerator) < denominator * 1.125) {
-                score = numerator > 0.f ? 1.f : -1.f;
-            } else {
-                score = 0;
-            }
-        }
-    }
-}
-
 #ifdef CV_SIMD
-float convSimd(const uchar *kernel, const uchar *src, const int kernelWidth) {
-    const auto blockSize = cv::v_uint8::nlanes;
-    auto       vSum      = cv::vx_setall_u32(0);
-    int        i         = 0;
-    for (; i < kernelWidth - blockSize; i += blockSize) {
-        vSum += cv::v_dotprod_expand(cv::v_load(kernel + i), cv::v_load(src + i));
-    }
-    auto sum = cv::v_reduce_sum(vSum);
-
-    for (; i < kernelWidth; i++) {
-        sum += kernel[ i ] * src[ i ];
-    }
-
-    return static_cast<float>(sum);
-}
 
 void computeLine(const uchar *kernel, const uchar *src, const int kernelWidth, uint64_t &dot,
                  uint64_t &sum, uint64_t &sqSum) {
-    const auto blockSize = cv::v_uint8::nlanes;
-    auto       vDot      = cv::vx_setall_u32(0);
-    auto       vsqSum    = cv::vx_setall_u32(0);
-    int        i         = 0;
+    constexpr auto blockSize = cv::v_uint8::nlanes;
+    auto           vDot      = cv::vx_setall_u32(0);
+    auto           vsqSum    = cv::vx_setall_u32(0);
+    int            i         = 0;
     for (; i < kernelWidth - blockSize; i += blockSize) {
         auto vSrc  = cv::v_load(src + i);
         sum       += cv::v_reduce_sum(vSrc);
@@ -369,22 +302,6 @@ void computeLine(const uchar *kernel, const uchar *src, const int kernelWidth, u
         dot   += kernel[ i ] * src[ i ];
         sum   += src[ i ];
         sqSum += src[ i ] * src[ i ];
-    }
-}
-
-void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &result) {
-    result = cv::Mat::zeros(src.size() - templateImg.size() + cv::Size(1, 1), CV_32FC1);
-
-    for (int y = 0; y < result.rows; y++) {
-        auto *resultPtr = result.ptr<float>(y);
-        for (int x = 0; x < result.cols; x++) {
-            auto &score = resultPtr[ x ];
-            for (int templateRow = 0; templateRow < templateImg.rows; templateRow++) {
-                auto *srcPtr  = src.ptr<uchar>(y + templateRow) + x;
-                auto *temPtr  = templateImg.ptr<uchar>(templateRow);
-                score        += convSimd(temPtr, srcPtr, templateImg.cols);
-            }
-        }
     }
 }
 
@@ -403,18 +320,18 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const Reg
             uint64_t sum   = 0;
             uint64_t sqSum = 0;
             for (const auto &rle : region) {
-                auto *srcPtr = src.ptr<uchar>(y + rle.row) + x;
+                auto *srcPtr = src.ptr<uchar>(y + rle.row) + x + rle.startColumn;
                 auto *temPtr = templateImg.ptr<uchar>(rle.row) + rle.startColumn;
                 computeLine(temPtr, srcPtr, rle.length, dot, sum, sqSum);
             }
 
             const auto numerator = static_cast<double>(dot) - static_cast<double>(sum) * mean;
 
-            auto       fsqSum       = static_cast<double>(sqSum);
+            const auto fsqSum       = static_cast<double>(sqSum);
             const auto partSqNormal = fsqSum - static_cast<double>(sum * sum) * invArea;
 
             const auto diff = std::max(partSqNormal, 0.);
-            auto       denominator =
+            const auto denominator =
                 (diff <= std::min(0.5, 10 * FLT_EPSILON * fsqSum)) ? 0 : sqrt(diff) * normal;
 
             if (abs(numerator) < denominator) {
@@ -426,137 +343,27 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const Reg
             }
         }
     }
-
-    // auto mat = templateImg;
-    // drawRegion(mat, region);
-    // if (!mat.empty()) {
-    //     return;
-    // }
 }
-
-static void common_matchTemplate(Mat &img, Mat &templ, Mat &result, int method, int cn) {
-    if (method == CV_TM_CCORR)
-        return;
-
-    int  numType  = method == CV_TM_CCORR || method == CV_TM_CCORR_NORMED     ? 0
-                    : method == CV_TM_CCOEFF || method == CV_TM_CCOEFF_NORMED ? 1
-                                                                              : 2;
-    bool isNormed = method == CV_TM_CCORR_NORMED || method == CV_TM_SQDIFF_NORMED ||
-                    method == CV_TM_CCOEFF_NORMED;
-
-    double invArea = 1. / ((double)templ.rows * templ.cols);
-
-    Mat     sum, sqsum;
-    Scalar  templMean, templSdv;
-    double *q0 = 0, *q1 = 0, *q2 = 0, *q3 = 0;
-    double  templNorm = 0, templSum2 = 0;
-
-    if (method == CV_TM_CCOEFF) {
-        integral(img, sum, CV_64F);
-        templMean = mean(templ);
-    } else {
-        integral(img, sum, sqsum, CV_64F);
-        meanStdDev(templ, templMean, templSdv);
-
-        templNorm = templSdv[ 0 ] * templSdv[ 0 ] + templSdv[ 1 ] * templSdv[ 1 ] +
-                    templSdv[ 2 ] * templSdv[ 2 ] + templSdv[ 3 ] * templSdv[ 3 ];
-
-        if (templNorm < DBL_EPSILON && method == CV_TM_CCOEFF_NORMED) {
-            result = Scalar::all(1);
-            return;
-        }
-
-        templSum2 = templNorm + templMean[ 0 ] * templMean[ 0 ] + templMean[ 1 ] * templMean[ 1 ] +
-                    templMean[ 2 ] * templMean[ 2 ] + templMean[ 3 ] * templMean[ 3 ];
-
-        if (numType != 1) {
-            templMean = Scalar::all(0);
-            templNorm = templSum2;
-        }
-
-        templSum2 /= invArea;
-        templNorm  = std::sqrt(templNorm);
-        templNorm /= std::sqrt(invArea); // care of accuracy here
-
-        CV_Assert(sqsum.data != NULL);
-        q0 = (double *)sqsum.data;
-        q1 = q0 + templ.cols * cn;
-        q2 = (double *)(sqsum.data + templ.rows * sqsum.step);
-        q3 = q2 + templ.cols * cn;
-    }
-
-    CV_Assert(sum.data != NULL);
-    double *p0 = (double *)sum.data;
-    double *p1 = p0 + templ.cols * cn;
-    double *p2 = (double *)(sum.data + templ.rows * sum.step);
-    double *p3 = p2 + templ.cols * cn;
-
-    int sumstep = sum.data ? (int)(sum.step / sizeof(double)) : 0;
-    int sqstep  = sqsum.data ? (int)(sqsum.step / sizeof(double)) : 0;
-
-    int i, j, k;
-
-    for (i = 0; i < result.rows; i++) {
-        float *rrow = result.ptr<float>(i);
-        int    idx  = i * sumstep;
-        int    idx2 = i * sqstep;
-
-        for (j = 0; j < result.cols; j++, idx += cn, idx2 += cn) {
-            double num      = rrow[ j ], t;
-            double wndMean2 = 0, wndSum2 = 0;
-
-            if (numType == 1) {
-                for (k = 0; k < cn; k++) {
-                    t         = p0[ idx + k ] - p1[ idx + k ] - p2[ idx + k ] + p3[ idx + k ];
-                    wndMean2 += t * t;
-                    num      -= t * templMean[ k ];
-                }
-
-                wndMean2 *= invArea;
-            }
-
-            if (isNormed || numType == 2) {
-                for (k = 0; k < cn; k++) {
-                    t        = q0[ idx2 + k ] - q1[ idx2 + k ] - q2[ idx2 + k ] + q3[ idx2 + k ];
-                    wndSum2 += t;
-                }
-
-                if (numType == 2) {
-                    num = wndSum2 - 2 * num + templSum2;
-                    num = MAX(num, 0.);
-                }
-            }
-
-            if (isNormed) {
-                double diff2 = MAX(wndSum2 - wndMean2, 0);
-                if (diff2 <= std::min(0.5, 10 * FLT_EPSILON * wndSum2))
-                    t = 0; // avoid rounding errors
-                else
-                    t = std::sqrt(diff2) * templNorm;
-
-                if (fabs(num) < t)
-                    num /= t;
-                else if (fabs(num) < t * 1.125)
-                    num = num > 0 ? 1 : -1;
-                else
-                    num = method != CV_TM_SQDIFF_NORMED ? 0 : 1;
-            }
-
-            rrow[ j ] = (float)num;
-        }
-    }
-}
-
 #endif
 
 void matchTemplate(const cv::Mat &src, cv::Mat &result, const Template &layerTemplate) {
 #ifdef CV_SIMD
-    matchTemplateSimd(src, layerTemplate.img, result);
-    coeffDenominator(src, layerTemplate.img.size(), result, layerTemplate.mean,
-                     layerTemplate.normal, layerTemplate.invArea, false);
-#endif // CV_SIMD
+    matchTemplateSimd(src, layerTemplate.img, layerTemplate.region, result, layerTemplate.mean,
+                      layerTemplate.normal, layerTemplate.invArea);
 
-    cv::matchTemplate(src, layerTemplate.img, result, cv::TM_CCOEFF_NORMED, layerTemplate.mask);
+#else
+    // make mask at train model process
+    cv::Point2f pts[ 4 ];
+    RotatedRectPoints(layerTemplate.rect, pts);
+    cv::Mat roi = cv::Mat::zeros(layerTemplate.img.size(), CV_8UC1);
+    cv::fillConvexPoly(roi,
+                       std::vector<cv::Point>{cv::Point(pts[ 0 ]), cv::Point(pts[ 1 ]),
+                                              cv::Point(pts[ 2 ]), cv::Point(pts[ 3 ])},
+                       cv::Scalar(255));
+
+    cv::matchTemplate(src, layerTemplate.img, result, cv::TM_CCOEFF_NORMED, roi);
+
+#endif // CV_SIMD
 }
 
 void nextMaxLoc(const cv::Point &pos, const cv::Size templateSize, const double maxOverlap,
@@ -744,9 +551,6 @@ Model *trainModel(const cv::Mat &src, int level, double startAngle, double spanA
     for (int i = 0; i < level; i++) {
         const auto &pyramid = pyramids[ i ];
 
-        // auto border = cv::mean(pyramid)[ 0 ] > 128 ? 0 : 255;
-
-        // const auto area = pyramid.size().area();
         Layer layer;
         layer.angleStep = angleStep * (1 << i);
 
@@ -780,16 +584,16 @@ Model *trainModel(const cv::Mat &src, int level, double startAngle, double spanA
                                cv::Scalar(255));
 
             // draw rotated rect line, then encode with run-length-encode
-            layerTemplate.mask = roi;
+            layerTemplate.region = borderRegion(roi);
 
-            // cv::Scalar mean;
-            // cv::Scalar stdDev;
-            // cv::meanStdDev(rotated, mean, stdDev, roi);
-            // const auto &stdDevVal = stdDev[ 0 ];
-            //
-            // layerTemplate.invArea = 1. / regionArea(borderRegion(roi));
-            // layerTemplate.normal  = stdDevVal / sqrt(layerTemplate.invArea);
-            // layerTemplate.mean    = mean[ 0 ];
+            cv::Scalar mean;
+            cv::Scalar stdDev;
+            cv::meanStdDev(rotated, mean, stdDev, roi);
+            const auto &stdDevVal = stdDev[ 0 ];
+
+            layerTemplate.invArea = 1. / regionArea(borderRegion(roi));
+            layerTemplate.normal  = stdDevVal / sqrt(layerTemplate.invArea);
+            layerTemplate.mean    = mean[ 0 ];
 
             layer.templates.emplace_back(std::move(layerTemplate));
         }
@@ -872,8 +676,6 @@ std::vector<Candidate> matchTopLevel(const cv::Mat &dstTop, const Layer &layer,
     return candidates;
 }
 
-// #include <iostream>
-
 std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
                                       const double                  modelAngleStart,
                                       const std::vector<Candidate> &candidates,
@@ -884,10 +686,9 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
     for (const auto &candidate : candidates) {
         auto pose    = candidate;
         bool matched = true;
-        // std::cout << "angle:" << pose.angle << ":";
         for (int currentLevel = level - 1; currentLevel >= 0; currentLevel--) {
             const auto &layer = model->layers[ currentLevel ];
-            const int   anglendex =
+            const int   angleIndex =
                 static_cast<int>(round((pose.angle - modelAngleStart) / layer.angleStep));
             const auto &currentDstImg  = pyramids[ currentLevel ];
             const auto  center         = pose.pos * 2.;
@@ -896,7 +697,7 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
             Candidate newCandidate;
             cv::Mat   newScoreRect;
             for (int i = -1; i <= 1; i++) {
-                auto index = anglendex + i;
+                auto index = angleIndex + i;
                 if (index < 0 || index >= static_cast<int>(layer.templates.size())) {
                     // out of range
                     continue;
@@ -904,7 +705,6 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
 
                 // out of range?
                 const auto &layerTemplate = layer.templates[ index ];
-                // std::cout << layerTemplate.rect.angle;
                 auto offset = cv::Point2d(layerTemplate.img.cols / 2., layerTemplate.img.rows / 2.);
                 cv::Rect rect(center - offset - cv::Point2d(3, 3),
                               center + offset + cv::Point2d(3, 3));
@@ -930,7 +730,6 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
                 double    maxScore;
                 cv::Point maxPos;
                 cv::minMaxLoc(result, nullptr, &maxScore, nullptr, &maxPos);
-                // std::cout << "(" << maxScore << "),";
 
                 if (newCandidate.score >= maxScore || maxScore < scoreThreshold) {
                     continue;
@@ -948,7 +747,6 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
                 }
             }
 
-            // std::cout << "---[" << currentLevel << "]";
             if (newCandidate.score < scoreThreshold) {
                 matched = false;
                 break;
@@ -960,7 +758,6 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
 
             pose = newCandidate;
         }
-        // std::cout << std::endl;
 
         if (!matched) {
             continue;
@@ -1020,8 +817,9 @@ std::vector<Pose> matchModel(const cv::Mat &dst, const Model *model, int level, 
     cv::buildPyramid(dst, pyramids, level);
 
     // match top
-    auto candidates = matchTopLevel(pyramids.back(), model->layers[ level ], model->startAngle,
-                                    startAngle, spanAngle, maxOverlap, minScore, maxCount, level);
+    const auto candidates =
+        matchTopLevel(pyramids.back(), model->layers[ level ], model->startAngle, startAngle,
+                      spanAngle, maxOverlap, minScore, maxCount, level);
 
     // match candidate each level
     std::vector<Candidate> levelMatched =
@@ -1032,8 +830,8 @@ std::vector<Pose> matchModel(const cv::Mat &dst, const Model *model, int level, 
     }
 
     // filter overlap
-    std::vector<cv::RotatedRect> rects;
     {
+        std::vector<cv::RotatedRect> rects;
         rects.reserve(levelMatched.size());
         const auto size = model->source.size();
         for (const auto &candidate : levelMatched) {
@@ -1054,9 +852,6 @@ std::vector<Pose> matchModel(const cv::Mat &dst, const Model *model, int level, 
                 Pose{static_cast<float>(candidate.pos.x), static_cast<float>(candidate.pos.y),
                      static_cast<float>(candidate.angle), static_cast<float>(candidate.score)});
         }
-
-        std::sort(result.begin(), result.end(),
-                  [](const Pose &a, const Pose &b) { return a.score > b.score; });
     }
 
     return result;
