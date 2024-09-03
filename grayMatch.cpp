@@ -428,11 +428,24 @@ Model *trainModel(const cv::Mat &src, int level) {
 
     auto  *result = new Model;
     Model &model  = *result;
-    cv::buildPyramid(src, model.pyramids, level);
-    model.borderColor = cv::mean(src).val[ 0 ] < 128 ? 255 : 0;
-    model.reserve(model.pyramids.size());
 
-    for (const auto &pyramid : model.pyramids) {
+    std::vector<cv::Mat> pyramids;
+    cv::buildPyramid(src, pyramids, level);
+    model.borderColor = cv::mean(src).val[ 0 ] < 128 ? 255 : 0;
+    model.reserve(pyramids.size());
+
+    for (const auto &pyramid : pyramids) {
+        int     alignedWidth = static_cast<int>(cv::alignSize(pyramid.cols, cv::v_uint8::nlanes));
+        auto    img          = cv::Mat::zeros(pyramid.rows, alignedWidth, CV_8UC1);
+        cv::Mat sub          = img(cv::Rect(0, 0, pyramid.cols, pyramid.rows));
+        for (int y = 0; y < pyramid.rows; y++) {
+            auto *dstPtr = sub.ptr<uchar>(y);
+            auto *srcPtr = pyramid.ptr<uchar>(y);
+            memcpy(dstPtr, srcPtr, pyramid.cols);
+        }
+
+        model.pyramids.push_back(sub);
+
         auto invArea = 1. / pyramid.size().area();
 
         cv::Scalar mean;

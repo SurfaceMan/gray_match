@@ -26,6 +26,7 @@ struct Model {
     }
 
     void reserve(const std::size_t size) {
+        pyramids.reserve(size);
         normal.reserve(size);
         invArea.reserve(size);
         mean.reserve(size);
