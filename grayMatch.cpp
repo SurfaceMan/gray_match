@@ -273,12 +273,6 @@ float convSimd(const uchar *kernel, const uchar *src, const int kernelWidth) {
 
 void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &result) {
     result = cv::Mat::zeros(src.size() - templateImg.size() + cv::Size(1, 1), CV_32FC1);
-
-    auto step = int(templateImg.step);
-    if (step < 0) {
-        return;
-    }
-
     for (int y = 0; y < result.rows; y++) {
         auto *resultPtr = result.ptr<float>(y);
         for (int x = 0; x < result.cols; x++) {
