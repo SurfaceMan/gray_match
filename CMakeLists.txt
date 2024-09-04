@@ -18,10 +18,15 @@ target_include_directories(algo PRIVATE ${OpenCV_INCLUDE_DIRS})
 target_link_libraries(algo ${OpenCV_LIBRARIES})
 target_compile_options(algo PRIVATE
         $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX /external:W0>
-        $<$<STREQUAL:${CMAKE_SYSTEM_NAME},Linux>: -mlsx -fPIC -fvisibility=hidden -Wl,--exclude-libs,ALL -Wall -Wextra -Wpedantic -Wmisleading-indentation -Wunused -Wuninitialized -Wshadow -Wconversion -Werror>
+        $<$<STREQUAL:${CMAKE_SYSTEM_NAME},Linux>: -fPIC -fvisibility=hidden -Wl,--exclude-libs,ALL -Wall -Wextra -Wpedantic -Wmisleading-indentation -Wunused -Wuninitialized -Wshadow -Wconversion -Werror>
         $<$<AND:$<CXX_COMPILER_ID:Clang>,$<STREQUAL:${CMAKE_SYSTEM_NAME},Windows>>:/W4 /WX /external:W0>
+        $<$<STREQUAL:${CMAKE_SYSTEM_PROCESSOR},loongarch64>:-mlsx>
 )
-target_compile_definitions(algo PUBLIC API_EXPORTS)
+target_compile_definitions(algo PUBLIC API_EXPORTS
+        $<$<STREQUAL:${CMAKE_SYSTEM_PROCESSOR},loongarch64>:CV_LSX>
+)
+
+message("Arch:${CMAKE_SYSTEM_PROCESSOR}")
 
 #==============================================================
 #exe
