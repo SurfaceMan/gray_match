@@ -285,6 +285,28 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &
         }
     }
 }
+
+void matchTemplateSimd2(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &result) {
+    result = cv::Mat::zeros(src.size() - templateImg.size() + cv::Size(1, 1), CV_32FC1);
+
+    for (int templateRow = 0; templateRow < templateImg.rows; templateRow++) {
+        auto *tPtr = templateImg.ptr<uchar>(templateRow);
+        for (int templateCol  = 0; templateCol < templateImg.cols;
+             templateCol     += cv::v_uint8::nlanes) {
+            auto vTemplate = cv::v_load_aligned(tPtr + templateCol);
+
+            for (int y = 0; y < src.rows; y++) {
+                auto *srcPtr = src.ptr<uchar>();
+                auto  vSrc1  = cv::v_load(srcPtr);
+                for (int x = 0; x < src.cols; x += cv::v_uint8::nlanes) {
+
+                    // cv::v_extract<1>()
+                }
+            }
+        }
+    }
+}
+
 #endif
 
 void matchTemplate(cv::Mat &src, cv::Mat &result, const Model *model, int level) {
