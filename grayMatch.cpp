@@ -264,7 +264,7 @@ float convSimd(const uchar *kernel, const uchar *src, const int kernelWidth) {
     constexpr auto blockSize = cv::v_uint8::nlanes;
     auto           vSum      = cv::vx_setall_u32(0);
     for (int i = 0; i < kernelWidth; i += blockSize) {
-        vSum += cv::v_dotprod_expand(cv::v_load(kernel + i), cv::v_load(src + i));
+        vSum += cv::v_dotprod_expand(cv::v_load_aligned(kernel + i), cv::v_load(src + i));
     }
     auto sum = cv::v_reduce_sum(vSum);
 
