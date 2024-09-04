@@ -261,10 +261,9 @@ void coeffDenominator(const cv::Mat &src, const cv::Size &templateSize, cv::Mat 
 
 #ifdef CV_SIMD
 float convSimd(const uchar *kernel, const uchar *src, const int kernelWidth) {
-    const auto blockSize = cv::v_uint8::nlanes;
-    auto       vSum      = cv::vx_setall_u32(0);
-    int        i         = 0;
-    for (; i < kernelWidth; i += blockSize) {
+    constexpr auto blockSize = cv::v_uint8::nlanes;
+    auto           vSum      = cv::vx_setall_u32(0);
+    for (int i = 0; i < kernelWidth; i += blockSize) {
         vSum += cv::v_dotprod_expand(cv::v_load(kernel + i), cv::v_load(src + i));
     }
     auto sum = cv::v_reduce_sum(vSum);
