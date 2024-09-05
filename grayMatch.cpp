@@ -287,7 +287,10 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &
 }
 
 void matchTemplateSimd2(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &result) {
-    result = cv::Mat::zeros(src.size() - templateImg.size() + cv::Size(1, 1), CV_32FC1);
+    auto    size        = src.size() - templateImg.size() + cv::Size(1, 1);
+    auto    alignedWidt = static_cast<int>(cv::alignSize(size.width, cv::v_uint8::nlanes));
+    cv::Mat tmp         = cv::Mat::zeros(size.height, alignedWidt, CV_32FC1);
+    result              = tmp(cv::Rect(0, 0, size.width, size.height));
 
     for (int templateRow = 0; templateRow < templateImg.rows; templateRow++) {
         auto *tPtr = templateImg.ptr<uchar>(templateRow);
@@ -295,12 +298,50 @@ void matchTemplateSimd2(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat 
              templateCol     += cv::v_uint8::nlanes) {
             auto vTemplate = cv::v_load_aligned(tPtr + templateCol);
 
-            for (int y = 0; y < src.rows; y++) {
-                auto *srcPtr = src.ptr<uchar>();
-                auto  vSrc1  = cv::v_load(srcPtr);
-                for (int x = 0; x < src.cols; x += cv::v_uint8::nlanes) {
+            for (int y = templateRow; y < result.rows + templateRow; y++) {
+                auto *srcPtr    = src.ptr<uchar>(y);
+                auto *resultPtr = result.ptr<float>(y - templateRow);
+                auto  vSrc1     = cv::v_load(srcPtr + templateCol);
+                for (int x = templateCol; x < result.cols + templateCol; x += cv::v_uint8::nlanes) {
+                    auto resultIdx = x - templateCol;
+                    resultPtr[ resultIdx ] +=
+                        cv::v_reduce_sum(cv::v_dotprod_expand(vTemplate, vSrc1));
 
-                    // cv::v_extract<1>()
+                    auto vSrc2 = cv::v_load(srcPtr + x + cv::v_uint8::nlanes);
+
+                    // shift
+                    resultPtr[ resultIdx + 1 ] += cv::v_reduce_sum(
+                        cv::v_dotprod_expand(vTemplate, cv::v_extract<1>(vSrc1, vSrc2)));
+                    resultPtr[ resultIdx + 2 ] += cv::v_reduce_sum(
+                        cv::v_dotprod_expand(vTemplate, cv::v_extract<2>(vSrc1, vSrc2)));
+                    resultPtr[ resultIdx + 3 ] += cv::v_reduce_sum(
+                        cv::v_dotprod_expand(vTemplate, cv::v_extract<3>(vSrc1, vSrc2)));
+                    resultPtr[ resultIdx + 4 ] += cv::v_reduce_sum(
+                        cv::v_dotprod_expand(vTemplate, cv::v_extract<4>(vSrc1, vSrc2)));
+                    resultPtr[ resultIdx + 5 ] += cv::v_reduce_sum(
+                        cv::v_dotprod_expand(vTemplate, cv::v_extract<5>(vSrc1, vSrc2)));
+                    resultPtr[ resultIdx + 6 ] += cv::v_reduce_sum(
+                        cv::v_dotprod_expand(vTemplate, cv::v_extract<6>(vSrc1, vSrc2)));
+                    resultPtr[ resultIdx + 7 ] += cv::v_reduce_sum(
+                        cv::v_dotprod_expand(vTemplate, cv::v_extract<7>(vSrc1, vSrc2)));
+                    resultPtr[ resultIdx + 8 ] += cv::v_reduce_sum(
+                        cv::v_dotprod_expand(vTemplate, cv::v_extract<8>(vSrc1, vSrc2)));
+                    resultPtr[ resultIdx + 9 ] += cv::v_reduce_sum(
+                        cv::v_dotprod_expand(vTemplate, cv::v_extract<9>(vSrc1, vSrc2)));
+                    resultPtr[ resultIdx + 10 ] += cv::v_reduce_sum(
+                        cv::v_dotprod_expand(vTemplate, cv::v_extract<10>(vSrc1, vSrc2)));
+                    resultPtr[ resultIdx + 11 ] += cv::v_reduce_sum(
+                        cv::v_dotprod_expand(vTemplate, cv::v_extract<11>(vSrc1, vSrc2)));
+                    resultPtr[ resultIdx + 12 ] += cv::v_reduce_sum(
+                        cv::v_dotprod_expand(vTemplate, cv::v_extract<12>(vSrc1, vSrc2)));
+                    resultPtr[ resultIdx + 13 ] += cv::v_reduce_sum(
+                        cv::v_dotprod_expand(vTemplate, cv::v_extract<13>(vSrc1, vSrc2)));
+                    resultPtr[ resultIdx + 14 ] += cv::v_reduce_sum(
+                        cv::v_dotprod_expand(vTemplate, cv::v_extract<14>(vSrc1, vSrc2)));
+                    resultPtr[ resultIdx + 15 ] += cv::v_reduce_sum(
+                        cv::v_dotprod_expand(vTemplate, cv::v_extract<15>(vSrc1, vSrc2)));
+
+                    vSrc1 = vSrc2;
                 }
             }
         }
