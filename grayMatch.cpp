@@ -287,10 +287,10 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &
 }
 
 void matchTemplateSimd2(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &result) {
-    auto    size        = src.size() - templateImg.size() + cv::Size(1, 1);
-    auto    alignedWidt = static_cast<int>(cv::alignSize(size.width, cv::v_uint8::nlanes));
-    cv::Mat tmp         = cv::Mat::zeros(size.height, alignedWidt, CV_32FC1);
-    result              = tmp(cv::Rect(0, 0, size.width, size.height));
+    auto    size         = src.size() - templateImg.size() + cv::Size(1, 1);
+    auto    alignedWidth = static_cast<int>(cv::alignSize(size.width, cv::v_uint8::nlanes));
+    cv::Mat tmp          = cv::Mat::zeros(size.height, alignedWidth, CV_32FC1);
+    result               = tmp(cv::Rect(0, 0, size.width, size.height));
 
     for (int templateRow = 0; templateRow < templateImg.rows; templateRow++) {
         auto *tPtr = templateImg.ptr<uchar>(templateRow);
