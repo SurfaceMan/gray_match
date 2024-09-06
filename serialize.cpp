@@ -9,6 +9,8 @@ public:
         : m_size(size_)
         , m_data(data_) {}
 
+    virtual ~Buffer() = default;
+
     virtual void operator&(uchar &val)                   = 0;
     virtual void operator&(std::vector<cv::Mat> &val)    = 0;
     virtual void operator&(std::vector<cv::Scalar> &val) = 0;
@@ -185,7 +187,7 @@ void operation(Buffer *buf, Model &model) {
     (*buf) & (model);
 }
 
-bool serialize(const Model_t model, unsigned char *buffer, int *size) {
+bool serialize(Model *const model, unsigned char *buffer, int *size) {
     if (nullptr == size) {
         return false;
     }

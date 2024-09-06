@@ -203,15 +203,16 @@ cv::Size computeRotationSize(const cv::Size &dstSize, const cv::Size &templateSi
                            (templateSize.width > size.width && templateSize.height < size.height) ||
                            templateSize.area() > size.area();
     if (wrongSize) {
-        size = {static_cast<int>(max.x - min.x + 0.5), static_cast<int>(max.y - min.y + 0.5)};
+        size = {static_cast<int>(lround(max.x - min.x + 0.5)),
+                static_cast<int>(lround(max.y - min.y + 0.5))};
     }
 
     return size;
 }
 
-void coeffDenominator(const cv::Mat &src, const cv::Size &templateSize, cv::Mat &result,
-                      const double mean, const double normal, const double invArea,
-                      const bool equal1) {
+void ccoeffDenominator(const cv::Mat &src, const cv::Size &templateSize, cv::Mat &result,
+                       const double mean, const double normal, const double invArea,
+                       const bool equal1) {
     if (equal1) {
         result = cv::Scalar::all(1);
         return;
@@ -286,6 +287,7 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &
     }
 }
 
+/*
 void matchTemplateSimd2(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &result) {
     auto    size         = src.size() - templateImg.size() + cv::Size(1, 1);
     auto    alignedWidth = static_cast<int>(cv::alignSize(size.width, cv::v_uint8::nlanes));
@@ -347,6 +349,7 @@ void matchTemplateSimd2(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat 
         }
     }
 }
+*/
 
 #endif
 
@@ -356,8 +359,8 @@ void matchTemplate(cv::Mat &src, cv::Mat &result, const Model *model, int level)
 #else
     cv::matchTemplate(src, model->pyramids[ level ], result, cv::TM_CCORR);
 #endif
-    coeffDenominator(src, model->pyramids[ level ].size(), result, model->mean[ level ][ 0 ],
-                     model->normal[ level ], model->invArea[ level ], model->equal1[ level ] == 1);
+    ccoeffDenominator(src, model->pyramids[ level ].size(), result, model->mean[ level ][ 0 ],
+                      model->normal[ level ], model->invArea[ level ], model->equal1[ level ] == 1);
 }
 
 void nextMaxLoc(const cv::Point &pos, const cv::Size templateSize, const double maxOverlap,
@@ -756,14 +759,14 @@ std::vector<Pose> matchModel(const cv::Mat &dst, const Model *model, int level,
     return result;
 }
 
-Model_t trainModel(const unsigned char *data, int width, int height, int channels, int bytesPerline,
+Model_t trainModel(const unsigned char *data, int width, int height, int channels, int bytesPerLine,
                    int roiLeft, int roiTop, int roiWidth, int roiHeight, int levelNum) {
     if ((1 != channels && 3 != channels && 4 != channels) || nullptr == data) {
         return nullptr;
     }
 
     auto    type = channels == 1 ? CV_8UC1 : (channels == 3 ? CV_8UC3 : CV_8UC4);
-    cv::Mat img(cv::Size(width, height), type, (void *)data, bytesPerline);
+    cv::Mat img(cv::Size(width, height), type, const_cast<unsigned char *>(data), bytesPerLine);
 
     cv::Mat src;
     if (1 == channels) {
@@ -782,8 +785,8 @@ Model_t trainModel(const unsigned char *data, int width, int height, int channel
     return trainModel(src(roi), levelNum);
 }
 
-void matchModel(const unsigned char *data, int width, int height, int channels, int bytesPerline,
-                int roiLeft, int roiTop, int roiWidth, int roiHeight, const Model_t model,
+void matchModel(const unsigned char *data, int width, int height, int channels, int bytesPerLine,
+                int roiLeft, int roiTop, int roiWidth, int roiHeight, const Model *model,
                 int *count, Pose *poses, int level, double startAngle, double spanAngle,
                 double maxOverlap, double minScore, int subpixel) {
     if (nullptr == count) {
@@ -801,7 +804,7 @@ void matchModel(const unsigned char *data, int width, int height, int channels, 
     }
 
     auto    type = channels == 1 ? CV_8UC1 : (channels == 3 ? CV_8UC3 : CV_8UC4);
-    cv::Mat img(cv::Size(width, height), type, (void *)data, bytesPerline);
+    cv::Mat img(cv::Size(width, height), type, const_cast<unsigned char *>(data), bytesPerLine);
 
     cv::Mat dst;
     if (1 == channels) {
@@ -840,7 +843,7 @@ void freeModel(Model_t *model) {
     *model = nullptr;
 }
 
-int modelLevel(const Model_t model) {
+int modelLevel(const Model *model) {
     if (nullptr == model) {
         return 0;
     }
@@ -848,7 +851,7 @@ int modelLevel(const Model_t model) {
     return static_cast<int>(model->pyramids.size());
 }
 
-void modelImage(const Model_t model, int level, unsigned char *data, int length, int *width,
+void modelImage(const Model *model, int level, unsigned char *data, int length, int *width,
                 int *height, int *channels) {
     if (nullptr == model) {
         return;
