@@ -786,7 +786,7 @@ Model_t trainModel(const unsigned char *data, int width, int height, int channel
 }
 
 void matchModel(const unsigned char *data, int width, int height, int channels, int bytesPerLine,
-                int roiLeft, int roiTop, int roiWidth, int roiHeight, const Model *model,
+                int roiLeft, int roiTop, int roiWidth, int roiHeight, const Model_t model,
                 int *count, Pose *poses, int level, double startAngle, double spanAngle,
                 double maxOverlap, double minScore, int subpixel) {
     if (nullptr == count) {

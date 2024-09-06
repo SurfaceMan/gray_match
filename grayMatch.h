@@ -55,7 +55,7 @@ API_PUBLIC Model_t trainModel(const unsigned char *data, int width, int height, 
  */
 API_PUBLIC void matchModel(const unsigned char *data, int width, int height, int channels,
                            int bytesPerLine, int roiLeft, int roiTop, int roiWidth, int roiHeight,
-                           const Model* model, int *count, Pose *poses, int level,
+                           const Model_t model, int *count, Pose *poses, int level,
                            double startAngle, double spanAngle, double maxOverlap, double minScore,
                            int subpixel);
 
@@ -64,7 +64,7 @@ API_PUBLIC void matchModel(const unsigned char *data, int width, int height, int
  * @param model
  * @return pyramid level
  */
-API_PUBLIC int modelLevel(const Model* model);
+API_PUBLIC int modelLevel(const Model_t model);
 
 /**
  * @brief get trained model image
@@ -77,7 +77,7 @@ API_PUBLIC int modelLevel(const Model* model);
  * @param channels image channels, can input nullptr
  * @return
  */
-API_PUBLIC void modelImage(const Model* model, int level, unsigned char *data, int length,
+API_PUBLIC void modelImage(const Model_t model, int level, unsigned char *data, int length,
                            int *width, int *height, int *channels);
 
 /**
@@ -94,7 +94,7 @@ API_PUBLIC void freeModel(Model_t *model);
  * @param size in(buffer size)/out(written size)
  * @return true(success)false(failed)
  */
-API_PUBLIC bool serialize(const Model* model, unsigned char *buffer, int *size);
+API_PUBLIC bool serialize(const Model_t model, unsigned char *buffer, int *size);
 
 /**
  * @brief deserialize model
