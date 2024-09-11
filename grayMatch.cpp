@@ -277,12 +277,19 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &
     for (int y = 0; y < result.rows; y++) {
         auto *resultPtr = result.ptr<float>(y);
         for (int x = 0; x < result.cols; x++) {
-            auto &score = resultPtr[ x ];
+            auto vSum = cv::vx_setall_u32(0);
             for (int templateRow = 0; templateRow < templateImg.rows; templateRow++) {
-                auto *srcPtr  = src.ptr<uchar>(y + templateRow) + x;
-                auto *temPtr  = templateImg.ptr<uchar>(templateRow);
-                score        += convSimd(temPtr, srcPtr, templateImg.cols);
+                auto *srcPtr = src.ptr<uchar>(y + templateRow) + x;
+                auto *temPtr = templateImg.ptr<uchar>(templateRow);
+
+                for (int i = 0; i < templateImg.cols; i += cv::v_uint8::nlanes) {
+                    vSum += cv::v_dotprod_expand(cv::v_load_aligned(temPtr + i),
+                                                 cv::v_load(srcPtr + i));
+                }
             }
+
+            auto sum       = cv::v_reduce_sum(vSum);
+            resultPtr[ x ] = static_cast<float>(sum);
         }
     }
 }
