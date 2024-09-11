@@ -210,6 +210,41 @@ cv::Size computeRotationSize(const cv::Size &dstSize, const cv::Size &templateSi
     return size;
 }
 
+/*
+void integral(const cv::Mat &src, cv::Mat &sum, cv::Mat &sqsum) {
+    sum   = cv::Mat(src.size(), CV_64FC1);
+    sqsum = cv::Mat(src.size(), CV_64FC1);
+
+    for (int y = 0; y < src.rows; y++) {
+        auto *srcPtr    = src.ptr<uchar>(y);
+        auto *preSumPtr = sum.ptr<uint64_t>(y);
+        auto *sumPtr    = sum.ptr<uint64_t>(y + 1);
+
+        cv::v_int32 prev = cv::v_setzero_s32();
+
+        int x = 0;
+        for (; x < src.cols - cv::v_uint8::nlanes; x += cv::v_uint8::nlanes) {
+            cv::v_int16 el8 = cv::v_reinterpret_as_s16(cv::vx_load_expand(srcPtr + x));
+            cv::v_int32 el4l, el4h;
+
+            el8 += cv::v_rotate_left<1>(el8);
+            el8 += cv::v_rotate_left<2>(el8);
+
+            cv::v_expand(el8, el4l, el4h);
+            el4l += prev;
+            el4h += el4l;
+            prev  = cv::v_broadcast_element<cv::v_int32::nlanes - 1>(el4h);
+
+            cv::v_store(sumPtr + x, el4l + cv::vx_load(preSumPtr + x));
+            cv::v_store(sumPtr + x + v_int32::nlanes,
+                        el4h + cv::vx_load(prev_sum_row + j + v_int32::nlanes));
+        }
+
+        for (; x < src.cols; x++) {}
+    }
+}
+*/
+
 void ccoeffDenominator(const cv::Mat &src, const cv::Size &templateSize, cv::Mat &result,
                        const double mean, const double normal, const double invArea,
                        const bool equal1) {
