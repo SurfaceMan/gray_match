@@ -328,11 +328,14 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &
                     auto vTem = cv::v_load_aligned(temPtr + i);
                     auto vSrc = cv::v_load(srcPtr + i);
 
+#ifdef __aarch64__
                     cv::v_mul_expand(vTem, vSrc, vDot1, vDot2);
                     cv::v_expand(vDot1, v1, v2);
                     cv::v_expand(vDot2, v3, v4);
-
                     vSum += v1 + v2 + v3 + v4;
+#else
+                    vSum += cv::v_dotprod_expand(vSrc, vTem);
+#endif
                 }
             }
 
