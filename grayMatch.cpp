@@ -210,41 +210,6 @@ cv::Size computeRotationSize(const cv::Size &dstSize, const cv::Size &templateSi
     return size;
 }
 
-/*
-void integral(const cv::Mat &src, cv::Mat &sum, cv::Mat &sqsum) {
-    sum   = cv::Mat(src.size(), CV_64FC1);
-    sqsum = cv::Mat(src.size(), CV_64FC1);
-
-    for (int y = 0; y < src.rows; y++) {
-        auto *srcPtr    = src.ptr<uchar>(y);
-        auto *preSumPtr = sum.ptr<uint64_t>(y);
-        auto *sumPtr    = sum.ptr<uint64_t>(y + 1);
-
-        cv::v_int32 prev = cv::v_setzero_s32();
-
-        int x = 0;
-        for (; x < src.cols - cv::v_uint8::nlanes; x += cv::v_uint8::nlanes) {
-            cv::v_int16 el8 = cv::v_reinterpret_as_s16(cv::vx_load_expand(srcPtr + x));
-            cv::v_int32 el4l, el4h;
-
-            el8 += cv::v_rotate_left<1>(el8);
-            el8 += cv::v_rotate_left<2>(el8);
-
-            cv::v_expand(el8, el4l, el4h);
-            el4l += prev;
-            el4h += el4l;
-            prev  = cv::v_broadcast_element<cv::v_int32::nlanes - 1>(el4h);
-
-            cv::v_store(sumPtr + x, el4l + cv::vx_load(preSumPtr + x));
-            cv::v_store(sumPtr + x + v_int32::nlanes,
-                        el4h + cv::vx_load(prev_sum_row + j + v_int32::nlanes));
-        }
-
-        for (; x < src.cols; x++) {}
-    }
-}
-*/
-
 void ccoeffDenominator(const cv::Mat &src, const cv::Size &templateSize, cv::Mat &result,
                        const double mean, const double normal, const double invArea,
                        const bool equal1) {
@@ -296,17 +261,6 @@ void ccoeffDenominator(const cv::Mat &src, const cv::Size &templateSize, cv::Mat
 }
 
 #ifdef CV_SIMD
-float convSimd(const uchar *kernel, const uchar *src, const int kernelWidth) {
-    constexpr auto blockSize = cv::v_uint8::nlanes;
-    auto           vSum      = cv::vx_setall_u32(0);
-    for (int i = 0; i < kernelWidth; i += blockSize) {
-        vSum += cv::v_dotprod_expand(cv::v_load_aligned(kernel + i), cv::v_load(src + i));
-    }
-    auto sum = cv::v_reduce_sum(vSum);
-
-    return static_cast<float>(sum);
-}
-
 void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &result) {
     result = cv::Mat(src.size() - templateImg.size() + cv::Size(1, 1), CV_32FC1);
 
@@ -344,71 +298,6 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &
         }
     }
 }
-
-/*
-void matchTemplateSimd2(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &result) {
-    auto    size         = src.size() - templateImg.size() + cv::Size(1, 1);
-    auto    alignedWidth = static_cast<int>(cv::alignSize(size.width, cv::v_uint8::nlanes));
-    cv::Mat tmp          = cv::Mat::zeros(size.height, alignedWidth, CV_32FC1);
-    result               = tmp(cv::Rect(0, 0, size.width, size.height));
-
-    for (int templateRow = 0; templateRow < templateImg.rows; templateRow++) {
-        auto *tPtr = templateImg.ptr<uchar>(templateRow);
-        for (int templateCol  = 0; templateCol < templateImg.cols;
-             templateCol     += cv::v_uint8::nlanes) {
-            auto vTemplate = cv::v_load_aligned(tPtr + templateCol);
-
-            for (int y = templateRow; y < result.rows + templateRow; y++) {
-                auto *srcPtr    = src.ptr<uchar>(y);
-                auto *resultPtr = result.ptr<float>(y - templateRow);
-                auto  vSrc1     = cv::v_load(srcPtr + templateCol);
-                for (int x = templateCol; x < result.cols + templateCol; x += cv::v_uint8::nlanes) {
-                    auto resultIdx = x - templateCol;
-                    resultPtr[ resultIdx ] +=
-                        cv::v_reduce_sum(cv::v_dotprod_expand(vTemplate, vSrc1));
-
-                    auto vSrc2 = cv::v_load(srcPtr + x + cv::v_uint8::nlanes);
-
-                    // shift
-                    resultPtr[ resultIdx + 1 ] += cv::v_reduce_sum(
-                        cv::v_dotprod_expand(vTemplate, cv::v_extract<1>(vSrc1, vSrc2)));
-                    resultPtr[ resultIdx + 2 ] += cv::v_reduce_sum(
-                        cv::v_dotprod_expand(vTemplate, cv::v_extract<2>(vSrc1, vSrc2)));
-                    resultPtr[ resultIdx + 3 ] += cv::v_reduce_sum(
-                        cv::v_dotprod_expand(vTemplate, cv::v_extract<3>(vSrc1, vSrc2)));
-                    resultPtr[ resultIdx + 4 ] += cv::v_reduce_sum(
-                        cv::v_dotprod_expand(vTemplate, cv::v_extract<4>(vSrc1, vSrc2)));
-                    resultPtr[ resultIdx + 5 ] += cv::v_reduce_sum(
-                        cv::v_dotprod_expand(vTemplate, cv::v_extract<5>(vSrc1, vSrc2)));
-                    resultPtr[ resultIdx + 6 ] += cv::v_reduce_sum(
-                        cv::v_dotprod_expand(vTemplate, cv::v_extract<6>(vSrc1, vSrc2)));
-                    resultPtr[ resultIdx + 7 ] += cv::v_reduce_sum(
-                        cv::v_dotprod_expand(vTemplate, cv::v_extract<7>(vSrc1, vSrc2)));
-                    resultPtr[ resultIdx + 8 ] += cv::v_reduce_sum(
-                        cv::v_dotprod_expand(vTemplate, cv::v_extract<8>(vSrc1, vSrc2)));
-                    resultPtr[ resultIdx + 9 ] += cv::v_reduce_sum(
-                        cv::v_dotprod_expand(vTemplate, cv::v_extract<9>(vSrc1, vSrc2)));
-                    resultPtr[ resultIdx + 10 ] += cv::v_reduce_sum(
-                        cv::v_dotprod_expand(vTemplate, cv::v_extract<10>(vSrc1, vSrc2)));
-                    resultPtr[ resultIdx + 11 ] += cv::v_reduce_sum(
-                        cv::v_dotprod_expand(vTemplate, cv::v_extract<11>(vSrc1, vSrc2)));
-                    resultPtr[ resultIdx + 12 ] += cv::v_reduce_sum(
-                        cv::v_dotprod_expand(vTemplate, cv::v_extract<12>(vSrc1, vSrc2)));
-                    resultPtr[ resultIdx + 13 ] += cv::v_reduce_sum(
-                        cv::v_dotprod_expand(vTemplate, cv::v_extract<13>(vSrc1, vSrc2)));
-                    resultPtr[ resultIdx + 14 ] += cv::v_reduce_sum(
-                        cv::v_dotprod_expand(vTemplate, cv::v_extract<14>(vSrc1, vSrc2)));
-                    resultPtr[ resultIdx + 15 ] += cv::v_reduce_sum(
-                        cv::v_dotprod_expand(vTemplate, cv::v_extract<15>(vSrc1, vSrc2)));
-
-                    vSrc1 = vSrc2;
-                }
-            }
-        }
-    }
-}
-*/
-
 #endif
 
 void matchTemplate(cv::Mat &src, cv::Mat &result, const Model *model, int level) {
