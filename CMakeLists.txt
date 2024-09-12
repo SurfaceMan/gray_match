@@ -42,3 +42,4 @@ target_compile_options(${PROJECT_NAME} PRIVATE
         $<$<STREQUAL:${CMAKE_SYSTEM_NAME},Linux>: -fPIC -fvisibility=hidden -Wall -Wextra -Wpedantic -Wmisleading-indentation -Wunused -Wuninitialized -Wshadow -Wconversion -Werror>
         $<$<AND:$<CXX_COMPILER_ID:Clang>,$<STREQUAL:${CMAKE_SYSTEM_NAME},Windows>>:/W4 /WX /external:W0>
 )
+target_compile_definitions(${PROJECT_NAME} PRIVATE IMG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/img")
