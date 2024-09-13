@@ -25,7 +25,7 @@ struct Pose {
  * @param roiTop rectangle roi top
  * @param roiWidth rectangle roi width
  * @param roiHeight rectangle roi height
- * @param levelNum pyramid levels (> 0)
+ * @param levelNum pyramid levels (> 0:user setting,-1:auto)
  * @return
  */
 API_PUBLIC Model_t trainModel(const unsigned char *data, int width, int height, int channels,
@@ -45,7 +45,7 @@ API_PUBLIC Model_t trainModel(const unsigned char *data, int width, int height, 
  * @param model trained model
  * @param count in(max detect count)/out(found count)
  * @param poses pose array inited with size not less than count
- * @param level match start at which level (level>=0 && level<modelLevel-1)
+ * @param level match start at which level (level>=0 && level<modelLevel-1,-1:auto)
  * @param startAngle rotation start angle
  * @param spanAngle rotation angle range
  * @param maxOverlap overlap threshold
