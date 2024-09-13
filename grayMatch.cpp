@@ -264,25 +264,31 @@ void ccoeffDenominator(const cv::Mat &src, const cv::Size &templateSize, cv::Mat
 void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &result) {
     result = cv::Mat(src.size() - templateImg.size() + cv::Size(1, 1), CV_32FC1);
 
-    cv::v_uint16 vDot1;
-    cv::v_uint16 vDot2;
-    cv::v_uint32 v1;
-    cv::v_uint32 v2;
-    cv::v_uint32 v3;
-    cv::v_uint32 v4;
+    auto       *resultStart = result.ptr<float>();
+    const auto  resultStep  = result.step[ 0 ] / result.step[ 1 ];
+    const auto *srcStart    = src.ptr<uchar>();
+    const auto  srcStep     = src.step[ 0 ];
+    const auto *temStart    = templateImg.ptr<uchar>();
+    const auto  temStep     = templateImg.step[ 0 ];
     for (int y = 0; y < result.rows; y++) {
-        auto *resultPtr = result.ptr<float>(y);
+        auto *resultPtr = resultStart + resultStep * y;
         for (int x = 0; x < result.cols; x++) {
             auto vSum = cv::vx_setall_u32(0);
             for (int templateRow = 0; templateRow < templateImg.rows; templateRow++) {
-                auto *srcPtr = src.ptr<uchar>(y + templateRow) + x;
-                auto *temPtr = templateImg.ptr<uchar>(templateRow);
+                auto *srcPtr = srcStart + srcStep * (y + templateRow) + x;
+                auto *temPtr = temStart + temStep * templateRow;
 
                 for (int i = 0; i < templateImg.cols; i += cv::v_uint8::nlanes) {
                     auto vTem = cv::v_load_aligned(temPtr + i);
                     auto vSrc = cv::v_load(srcPtr + i);
 
 #ifdef __aarch64__
+                    cv::v_uint16 vDot1;
+                    cv::v_uint16 vDot2;
+                    cv::v_uint32 v1;
+                    cv::v_uint32 v2;
+                    cv::v_uint32 v3;
+                    cv::v_uint32 v4;
                     cv::v_mul_expand(vTem, vSrc, vDot1, vDot2);
                     cv::v_expand(vDot1, v1, v2);
                     cv::v_expand(vDot2, v3, v4);
