@@ -59,7 +59,7 @@ int main() {
 
         auto t2 = cv::getTickCount();
         matchModel(dst.data, dst.cols, dst.rows, dst.channels(), int(dst.step), 0, 0, dst.cols,
-                   dst.rows, model, &num, poses.data(), 3, 0, 360, 0, 0.5, 1);
+                   dst.rows, model, &num, poses.data(), -1, 0, 360, 0, 0.5, 1);
         auto t3 = cv::getTickCount();
 
         auto matchCost = double(t3 - t2) / cv::getTickFrequency();
