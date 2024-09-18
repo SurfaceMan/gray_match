@@ -305,6 +305,7 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &
     }
 }
 
+/*
 bool Integral_SIMD(const uchar *src, size_t _srcstep, double *sum, size_t _sumstep, double *sqsum,
                    size_t _sqsumstep, double *tilted, size_t, int width, int height, int cn) {
     width *= cn;
@@ -377,6 +378,7 @@ void integralSimd(const cv::Mat &src, cv::Mat &sum, cv::Mat &sqSum) {
         }
     }
 }
+*/
 
 #endif
 
@@ -426,14 +428,14 @@ inline cv::Mat getRotationMatrix2D(const cv::Point2f &center, double angle) {
     double alpha  = std::cos(angle);
     double beta   = std::sin(angle);
 
-    cv::Mat_<double> rotate(2, 3);
-    auto             ptr = rotate.ptr<double>();
-    ptr[ 0 ]             = alpha;
-    ptr[ 1 ]             = beta;
-    ptr[ 2 ]             = (1 - alpha) * center.x - beta * center.y;
-    ptr[ 3 ]             = -beta;
-    ptr[ 4 ]             = alpha;
-    ptr[ 5 ]             = beta * center.x + (1 - alpha) * center.y;
+    cv::Mat rotate(2, 3, CV_64FC1);
+    auto    ptr = rotate.ptr<double>();
+    ptr[ 0 ]    = alpha;
+    ptr[ 1 ]    = beta;
+    ptr[ 2 ]    = (1 - alpha) * center.x - beta * center.y;
+    ptr[ 3 ]    = -beta;
+    ptr[ 4 ]    = alpha;
+    ptr[ 5 ]    = beta * center.x + (1 - alpha) * center.y;
 
     return rotate;
 }
