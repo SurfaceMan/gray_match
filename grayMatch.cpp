@@ -347,8 +347,25 @@ void nextMaxLoc(cv::Mat &score, const cv::Point &pos, const cv::Size templateSiz
     cv::minMaxLoc(score, nullptr, &maxScore, nullptr, &maxPos);
 }
 
+inline cv::Mat getRotationMatrix2D(const cv::Point2f &center, double angle) {
+    angle        *= CV_PI / 180;
+    double alpha  = std::cos(angle);
+    double beta   = std::sin(angle);
+
+    cv::Mat_<double> rotate(2, 3);
+    auto             ptr = rotate.ptr<double>();
+    ptr[ 0 ]             = alpha;
+    ptr[ 1 ]             = beta;
+    ptr[ 2 ]             = (1 - alpha) * center.x - beta * center.y;
+    ptr[ 3 ]             = -beta;
+    ptr[ 4 ]             = alpha;
+    ptr[ 5 ]             = beta * center.x + (1 - alpha) * center.y;
+
+    return rotate;
+}
+
 inline cv::Point2d transform(const cv::Point2d &point, const cv::Point &center, double angle) {
-    const auto rotate = cv::getRotationMatrix2D(center, angle, 1.);
+    const auto rotate = getRotationMatrix2D(center, angle);
 
     return transform(point, rotate);
 }
@@ -358,14 +375,13 @@ inline cv::Point2d sizeCenter(const cv::Size &size) {
 }
 
 void cropRotatedRoi(const cv::Mat &src, const cv::Size &templateSize, const cv::Point2d topLeft,
-                    const cv::Mat &rotate, cv::Mat &roi) {
+                    cv::Mat &rotate, cv::Mat &roi) {
     const auto     point = transform(topLeft, rotate);
     const cv::Size paddingSize(templateSize.width + 6, templateSize.height + 6);
-    auto           rt    = rotate;
-    rt.at<double>(0, 2) -= point.x - 3;
-    rt.at<double>(1, 2) -= point.y - 3;
+    rotate.at<double>(0, 2) -= point.x - 3;
+    rotate.at<double>(1, 2) -= point.y - 3;
 
-    cv::warpAffine(src, roi, rt, paddingSize);
+    cv::warpAffine(src, roi, rotate, paddingSize);
 }
 
 void filterOverlap(std::vector<Candidate> &candidates, const std::vector<cv::RotatedRect> &rects,
@@ -495,7 +511,7 @@ std::vector<Candidate> matchTopLevel(const cv::Mat &dstTop, double startAngle, d
 #pragma omp parallel for reduction(combine : candidates)
     for (int i = 0; i < count; i++) {
         const auto angle  = startAngle + angleStep * i;
-        auto       rotate = cv::getRotationMatrix2D(center, angle, 1.);
+        auto       rotate = getRotationMatrix2D(center, angle);
         auto       size   = computeRotationSize(dstTop.size(), templateTop.size(), angle, rotate);
 
         auto tx                  = (size.width - 1) / 2. - center.x;
@@ -583,7 +599,7 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
             cv::Mat   newScoreRect;
             for (int i = -1; i <= 1; i++) {
                 auto angle  = pose.angle + i * currentAngleStep;
-                auto rotate = cv::getRotationMatrix2D(center, angle, 1.);
+                auto rotate = getRotationMatrix2D(center, angle);
 
                 cv::Mat roi;
                 cropRotatedRoi(currentDstImg, tmpSize, topLeft, rotate, roi);
@@ -686,7 +702,7 @@ std::vector<Pose> matchModel(const cv::Mat &dst, const Model *model, int level,
         for (const auto &candidate : levelMatched) {
             std::vector<cv::Point2f> points{topRight + cv::Point2f(candidate.pos),
                                             bottomRight + cv::Point2f(candidate.pos)};
-            auto rotate = cv::getRotationMatrix2D(candidate.pos, -candidate.angle, 1.);
+            auto                     rotate = getRotationMatrix2D(candidate.pos, -candidate.angle);
             std::vector<cv::Point2f> rotatedPoints;
             cv::transform(points, rotatedPoints, rotate);
 
