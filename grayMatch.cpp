@@ -210,56 +210,6 @@ cv::Size computeRotationSize(const cv::Size &dstSize, const cv::Size &templateSi
     return size;
 }
 
-void ccoeffDenominator(const cv::Mat &src, const cv::Size &templateSize, cv::Mat &result,
-                       const double mean, const double normal, const double invArea,
-                       const bool equal1) {
-    if (equal1) {
-        result = cv::Scalar::all(1);
-        return;
-    }
-
-    cv::Mat sum;
-    cv::Mat sqSum;
-    cv::integral(src, sum, sqSum, CV_64F);
-
-    const auto *q0 = sqSum.ptr<double>(0);
-    const auto *q1 = q0 + templateSize.width;
-    const auto *q2 = sqSum.ptr<double>(templateSize.height);
-    const auto *q3 = q2 + templateSize.width;
-
-    const auto *p0 = sum.ptr<double>(0);
-    const auto *p1 = p0 + templateSize.width;
-    const auto *p2 = sum.ptr<double>(templateSize.height);
-    const auto *p3 = p2 + templateSize.width;
-
-    const auto step = sum.step / sizeof(double);
-
-    for (int y = 0; y < result.rows; y++) {
-        auto *scorePtr = result.ptr<float>(y);
-        auto  idx      = y * step;
-        for (int x = 0; x < result.cols; x++, idx++) {
-            auto      &score     = scorePtr[ x ];
-            const auto partSum   = p0[ idx ] - p1[ idx ] - p2[ idx ] + p3[ idx ];
-            const auto numerator = score - partSum * mean;
-
-            auto partSqSum    = q0[ idx ] - q1[ idx ] - q2[ idx ] + q3[ idx ];
-            auto partSqNormal = partSqSum - partSum * partSum * invArea;
-
-            const auto diff = std::max(partSqNormal, 0.);
-            double     denominator =
-                (diff <= std::min(0.5, 10 * FLT_EPSILON * partSqSum)) ? 0 : sqrt(diff) * normal;
-
-            if (abs(numerator) < denominator) {
-                score = static_cast<float>(numerator / denominator);
-            } else if (abs(numerator) < denominator * 1.125) {
-                score = numerator > 0.f ? 1.f : -1.f;
-            } else {
-                score = 0;
-            }
-        }
-    }
-}
-
 #ifdef CV_SIMD
 void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &result) {
     result = cv::Mat(src.size() - templateImg.size() + cv::Size(1, 1), CV_32FC1);
@@ -305,82 +255,209 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &
     }
 }
 
-/*
-bool Integral_SIMD(const uchar *src, size_t _srcstep, double *sum, size_t _sumstep, double *sqsum,
-                   size_t _sqsumstep, double *tilted, size_t, int width, int height, int cn) {
-    width *= cn;
+inline void integralSum(cv::v_uint16 &src, double *dst, cv::v_uint64 &pre) {
+    src += cv::v_rotate_left<1>(src);
+    src += cv::v_rotate_left<2>(src);
+    src += cv::v_rotate_left<4>(src);
 
-    // the first iteration
-    memset(sum, 0, (width + cn) * sizeof(double));
+    cv::v_uint32 v1;
+    cv::v_uint32 v2;
+    cv::v_expand(src, v1, v2);
 
-    if (cn == 1) {
-        // the others
-        for (int i = 0; i < height; ++i) {
-            const uchar *src_row      = src + _srcstep * i;
-            double      *prev_sum_row = (double *)((uchar *)sum + _sumstep * i) + 1;
-            double      *sum_row      = (double *)((uchar *)sum + _sumstep * (i + 1)) + 1;
+    cv::v_uint64 v3;
+    cv::v_uint64 v4;
+    cv::v_expand(v1, v3, v4);
+    v3 += pre;
+    v4 += pre;
+    cv::v_store(dst, cv::v_cvt_f64(cv::v_reinterpret_as_s64(v3)));
+    cv::v_store(dst + cv::v_float64::nlanes, cv::v_cvt_f64(cv::v_reinterpret_as_s64(v4)));
 
-            sum_row[ -1 ] = 0;
+    cv::v_expand(v2, v3, v4);
+    v3 += pre;
+    v4 += pre;
+    cv::v_store(dst + cv::v_float64::nlanes * 2, cv::v_cvt_f64(cv::v_reinterpret_as_s64(v3)));
+    cv::v_store(dst + cv::v_float64::nlanes * 3, cv::v_cvt_f64(cv::v_reinterpret_as_s64(v4)));
 
-            cv::v_float64 prev = cv::vx_setzero_f64();
-            int           j    = 0;
-            for (; j + cv::v_uint16::nlanes <= width; j += cv::v_uint16::nlanes) {
-                // get low 8 element
-                cv::v_int16   el8 = cv::v_reinterpret_as_s16(cv::vx_load_expand(src_row + j));
-                cv::v_float64 el4ll, el4lh, el4hl, el4hh;
+    pre = cv::v_setall_u64(cv::v_extract_n<cv::v_uint64::nlanes - 1>(v4));
+}
 
-                el8 += cv::v_rotate_left<1>(el8);
-                el8 += cv::v_rotate_left<2>(el8);
+inline void integralSum(cv::v_uint16 &src, double *dst, double *prevDst, cv::v_uint64 &pre) {
+    src += cv::v_rotate_left<1>(src);
+    src += cv::v_rotate_left<2>(src);
+    src += cv::v_rotate_left<4>(src);
 
-                cv::v_int32 el4li, el4hi;
-                cv::v_expand(el8, el4li, el4hi);
-                el4ll = cv::v_cvt_f64(el4li) + prev;
-                el4lh = cv::v_cvt_f64_high(el4li) + prev;
-                el4hl = cv::v_cvt_f64(el4hi) + el4ll;
-                el4hh = cv::v_cvt_f64_high(el4hi) + el4lh;
-                prev  = cv::vx_setall_f64(cv::v_extract_n<cv::v_float64::nlanes - 1>(el4hh));
+    cv::v_uint32 v1;
+    cv::v_uint32 v2;
+    cv::v_expand(src, v1, v2);
 
-                cv::v_store(sum_row + j, el4ll + cv::vx_load(prev_sum_row + j));
-                cv::v_store(sum_row + j + cv::v_float64::nlanes,
-                            el4lh + cv::vx_load(prev_sum_row + j + cv::v_float64::nlanes));
-                cv::v_store(sum_row + j + cv::v_float64::nlanes * 2,
-                            el4hl + cv::vx_load(prev_sum_row + j + cv::v_float64::nlanes * 2));
-                cv::v_store(sum_row + j + cv::v_float64::nlanes * 3,
-                            el4hh + cv::vx_load(prev_sum_row + j + cv::v_float64::nlanes * 3));
-            }
+    cv::v_uint64 v3;
+    cv::v_uint64 v4;
+    cv::v_expand(v1, v3, v4);
+    v3 += pre;
+    v4 += pre;
+    cv::v_store(dst, cv::v_cvt_f64(cv::v_reinterpret_as_s64(v3)) + cv::v_load(prevDst));
+    cv::v_store(dst + cv::v_float64::nlanes, cv::v_cvt_f64(cv::v_reinterpret_as_s64(v4)) +
+                                                 cv::v_load(prevDst + cv::v_float64::nlanes));
 
-            for (double v = sum_row[ j - 1 ] - prev_sum_row[ j - 1 ]; j < width; ++j)
-                sum_row[ j ] = (v += src_row[ j ]) + prev_sum_row[ j ];
-        }
-    }
+    cv::v_expand(v2, v3, v4);
+    v3 += pre;
+    v4 += pre;
+    cv::v_store(dst + cv::v_float64::nlanes * 2,
+                cv::v_cvt_f64(cv::v_reinterpret_as_s64(v3)) +
+                    cv::v_load(prevDst + cv::v_float64::nlanes * 2));
+    cv::v_store(dst + cv::v_float64::nlanes * 3,
+                cv::v_cvt_f64(cv::v_reinterpret_as_s64(v4)) +
+                    cv::v_load(prevDst + cv::v_float64::nlanes * 3));
 
-    cv::vx_cleanup();
+    pre = cv::v_setall_u64(cv::v_extract_n<cv::v_uint64::nlanes - 1>(v4));
+}
+
+inline void integralSum(cv::v_uint8 &src, double *dst, cv::v_uint64 &pre) {
+    cv::v_uint16 v1;
+    cv::v_uint16 v2;
+    cv::v_expand(src, v1, v2);
+
+    integralSum(v1, dst, pre);
+    integralSum(v2, dst + cv::v_uint16::nlanes, pre);
+}
+
+inline void integralSum(cv::v_uint8 &src, double *dst, double *prevDst, cv::v_uint64 &pre) {
+    cv::v_uint16 v1;
+    cv::v_uint16 v2;
+    cv::v_expand(src, v1, v2);
+
+    integralSum(v1, dst, prevDst, pre);
+    integralSum(v2, dst + cv::v_uint16::nlanes, prevDst + cv::v_uint16::nlanes, pre);
+}
+
+inline void integralSqSum(cv::v_uint8 &src, double *dst, cv::v_uint64 &pre) {
+    cv::v_uint16 v1;
+    cv::v_uint16 v2;
+    cv::v_expand(src, v1, v2);
+
+    v1 *= v1;
+    v2 *= v2;
+
+    integralSum(v1, dst, pre);
+    integralSum(v2, dst + cv::v_uint16::nlanes, pre);
+}
+
+inline void integralSqSum(cv::v_uint8 &src, double *dst, double *prevDst, cv::v_uint64 &pre) {
+    cv::v_uint16 v1;
+    cv::v_uint16 v2;
+    cv::v_expand(src, v1, v2);
+
+    v1 *= v1;
+    v2 *= v2;
+
+    integralSum(v1, dst, prevDst, pre);
+    integralSum(v2, dst + cv::v_uint16::nlanes, prevDst + cv::v_uint16::nlanes, pre);
 }
 
 void integralSimd(const cv::Mat &src, cv::Mat &sum, cv::Mat &sqSum) {
     sum.create(src.size(), CV_64FC1);
     sqSum.create(src.size(), CV_64FC1);
 
-    const auto *srcStart = src.ptr<uchar>();
-    const auto  srcStep  = src.step[ 0 ];
-    for (int y = 0; y < src.rows; y++) {
-        auto *srcPtr = srcStart + srcStep * y;
+    const auto *srcStart   = src.ptr<uchar>();
+    const auto  srcStep    = src.step[ 0 ];
+    auto       *sumStart   = sum.ptr<double>();
+    const auto  sumStep    = sum.step[ 0 ] / sum.step[ 1 ];
+    auto       *sqSumStart = sqSum.ptr<double>();
+    const auto  sqSumStep  = sqSum.step[ 0 ] / sqSum.step[ 1 ];
 
-        cv::v_float64 prev = cv::vx_setzero_f64();
-        int           x    = 0;
-        for (; x < src.rows - cv::v_uint8::nlanes; x += cv::v_uint8::nlanes) {
-            cv::v_uint16 v1;
-            cv::v_uint16 v2;
+    // first line
+    {
+        cv::v_uint64 prevSum   = cv::vx_setzero_u64();
+        cv::v_uint64 prevSqSum = cv::vx_setzero_u64();
+        int          x         = 0;
+        for (; x < src.cols - cv::v_uint8::nlanes; x += cv::v_uint8::nlanes) {
+            auto vSrc = cv::v_load(srcStart + x);
+            integralSum(vSrc, sumStart + x, prevSum);
+            integralSqSum(vSrc, sqSumStart + x, prevSqSum);
+        }
+        for (; x < src.cols; x++) {
+            auto val        = srcStart[ x ];
+            sumStart[ x ]   = sumStart[ x - 1 ] + val;
+            sqSumStart[ x ] = sqSumStart[ x - 1 ] + val * val;
+        }
+    }
+    for (int y = 1; y < src.rows; y++) {
+        auto *srcPtr      = srcStart + srcStep * y;
+        auto *sumPtr      = sumStart + sumStep * y;
+        auto *sqSumPtr    = sqSumStart + sqSumStep * y;
+        auto *preSumPtr   = sumStart + sumStep * (y - 1);
+        auto *preSqSumPtr = sqSumStart + sqSumStep * (y - 1);
 
-            cv::v_expand(cv::v_load(srcPtr + x), v1, v2);
-            v1 += cv::v_rotate_left<1>(v1);
-            v1 += cv::v_rotate_left<2>(v1);
+        cv::v_uint64 prevSum   = cv::vx_setzero_u64();
+        cv::v_uint64 prevSqSum = cv::vx_setzero_u64();
+        int          x         = 0;
+        for (; x < src.cols - cv::v_uint8::nlanes; x += cv::v_uint8::nlanes) {
+            auto vSrc = cv::v_load(srcPtr + x);
+            integralSum(vSrc, sumPtr + x, preSumPtr + x, prevSum);
+            integralSqSum(vSrc, sqSumPtr + x, preSqSumPtr + x, prevSqSum);
+        }
+        for (; x < src.cols; x++) {
+            auto val        = srcStart[ x ];
+            sumStart[ x ]   = sumStart[ x - 1 ] + preSumPtr[ x ] + val;
+            sqSumStart[ x ] = sqSumStart[ x - 1 ] + preSqSumPtr[ x ] + val * val;
         }
     }
 }
-*/
-
 #endif
+
+void ccoeffDenominator(const cv::Mat &src, const cv::Size &templateSize, cv::Mat &result,
+                       const double mean, const double normal, const double invArea,
+                       const bool equal1) {
+    if (equal1) {
+        result = cv::Scalar::all(1);
+        return;
+    }
+
+    cv::Mat sum;
+    cv::Mat sqSum;
+#ifdef CV_SIMD
+    integralSimd(src, sum, sqSum);
+#else
+    cv::integral(src, sum, sqSum, CV_64F);
+#endif
+
+    const auto *q0 = sqSum.ptr<double>(0);
+    const auto *q1 = q0 + templateSize.width;
+    const auto *q2 = sqSum.ptr<double>(templateSize.height);
+    const auto *q3 = q2 + templateSize.width;
+
+    const auto *p0 = sum.ptr<double>(0);
+    const auto *p1 = p0 + templateSize.width;
+    const auto *p2 = sum.ptr<double>(templateSize.height);
+    const auto *p3 = p2 + templateSize.width;
+
+    const auto step = sum.step / sizeof(double);
+
+    for (int y = 0; y < result.rows; y++) {
+        auto *scorePtr = result.ptr<float>(y);
+        auto  idx      = y * step;
+        for (int x = 0; x < result.cols; x++, idx++) {
+            auto      &score     = scorePtr[ x ];
+            const auto partSum   = p0[ idx ] - p1[ idx ] - p2[ idx ] + p3[ idx ];
+            const auto numerator = score - partSum * mean;
+
+            auto partSqSum    = q0[ idx ] - q1[ idx ] - q2[ idx ] + q3[ idx ];
+            auto partSqNormal = partSqSum - partSum * partSum * invArea;
+
+            const auto diff = std::max(partSqNormal, 0.);
+            double     denominator =
+                (diff <= std::min(0.5, 10 * FLT_EPSILON * partSqSum)) ? 0 : sqrt(diff) * normal;
+
+            if (abs(numerator) < denominator) {
+                score = static_cast<float>(numerator / denominator);
+            } else if (abs(numerator) < denominator * 1.125) {
+                score = numerator > 0.f ? 1.f : -1.f;
+            } else {
+                score = 0;
+            }
+        }
+    }
+}
 
 void matchTemplate(cv::Mat &src, cv::Mat &result, const Model *model, int level) {
 #ifdef CV_SIMD
