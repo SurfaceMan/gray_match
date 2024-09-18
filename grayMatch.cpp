@@ -477,6 +477,9 @@ inline double sizeAngleStep(const cv::Size &size) {
     return atan(2. / std::max(size.width, size.height)) * 180. / CV_PI;
 }
 
+#pragma omp declare reduction(combine : std::vector<Candidate> : omp_out.insert(                   \
+        omp_out.end(), omp_in.begin(), omp_in.end()))
+
 std::vector<Candidate> matchTopLevel(const cv::Mat &dstTop, double startAngle, double spanAngle,
                                      double maxOverlap, double minScore, int maxCount,
                                      const Model *model, int level) {
@@ -489,6 +492,7 @@ std::vector<Candidate> matchTopLevel(const cv::Mat &dstTop, double startAngle, d
     bool calMaxByBlock = (dstTop.size().area() / templateTop.size().area() > 500) && maxCount > 10;
 
     const auto count = static_cast<int>(spanAngle / angleStep) + 1;
+#pragma omp parallel for reduction(combine : candidates)
     for (int i = 0; i < count; i++) {
         const auto angle  = startAngle + angleStep * i;
         auto       rotate = cv::getRotationMatrix2D(center, angle, 1.);
@@ -553,9 +557,11 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
                                       const std::vector<Candidate> &candidates, double minScore,
                                       int subpixel, const Model *model, int level) {
     std::vector<Candidate> levelMatched;
+    auto                   count = static_cast<int>(candidates.size());
 
-    for (const auto &candidate : candidates) {
-        auto pose    = candidate;
+#pragma omp parallel for reduction(combine : levelMatched)
+    for (int index = 0; index < count; index++) {
+        auto pose    = candidates[ index ];
         bool matched = true;
         for (int currentLevel = level - 1; currentLevel >= 0; currentLevel--) {
             const auto &currentTemplateImg = model->pyramids[ currentLevel ];
