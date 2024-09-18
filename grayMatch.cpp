@@ -304,6 +304,80 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &
         }
     }
 }
+
+bool Integral_SIMD(const uchar *src, size_t _srcstep, double *sum, size_t _sumstep, double *sqsum,
+                   size_t _sqsumstep, double *tilted, size_t, int width, int height, int cn) {
+    width *= cn;
+
+    // the first iteration
+    memset(sum, 0, (width + cn) * sizeof(double));
+
+    if (cn == 1) {
+        // the others
+        for (int i = 0; i < height; ++i) {
+            const uchar *src_row      = src + _srcstep * i;
+            double      *prev_sum_row = (double *)((uchar *)sum + _sumstep * i) + 1;
+            double      *sum_row      = (double *)((uchar *)sum + _sumstep * (i + 1)) + 1;
+
+            sum_row[ -1 ] = 0;
+
+            cv::v_float64 prev = cv::vx_setzero_f64();
+            int           j    = 0;
+            for (; j + cv::v_uint16::nlanes <= width; j += cv::v_uint16::nlanes) {
+                // get low 8 element
+                cv::v_int16   el8 = cv::v_reinterpret_as_s16(cv::vx_load_expand(src_row + j));
+                cv::v_float64 el4ll, el4lh, el4hl, el4hh;
+
+                el8 += cv::v_rotate_left<1>(el8);
+                el8 += cv::v_rotate_left<2>(el8);
+
+                cv::v_int32 el4li, el4hi;
+                cv::v_expand(el8, el4li, el4hi);
+                el4ll = cv::v_cvt_f64(el4li) + prev;
+                el4lh = cv::v_cvt_f64_high(el4li) + prev;
+                el4hl = cv::v_cvt_f64(el4hi) + el4ll;
+                el4hh = cv::v_cvt_f64_high(el4hi) + el4lh;
+                prev  = cv::vx_setall_f64(cv::v_extract_n<cv::v_float64::nlanes - 1>(el4hh));
+
+                cv::v_store(sum_row + j, el4ll + cv::vx_load(prev_sum_row + j));
+                cv::v_store(sum_row + j + cv::v_float64::nlanes,
+                            el4lh + cv::vx_load(prev_sum_row + j + cv::v_float64::nlanes));
+                cv::v_store(sum_row + j + cv::v_float64::nlanes * 2,
+                            el4hl + cv::vx_load(prev_sum_row + j + cv::v_float64::nlanes * 2));
+                cv::v_store(sum_row + j + cv::v_float64::nlanes * 3,
+                            el4hh + cv::vx_load(prev_sum_row + j + cv::v_float64::nlanes * 3));
+            }
+
+            for (double v = sum_row[ j - 1 ] - prev_sum_row[ j - 1 ]; j < width; ++j)
+                sum_row[ j ] = (v += src_row[ j ]) + prev_sum_row[ j ];
+        }
+    }
+
+    cv::vx_cleanup();
+}
+
+void integralSimd(const cv::Mat &src, cv::Mat &sum, cv::Mat &sqSum) {
+    sum.create(src.size(), CV_64FC1);
+    sqSum.create(src.size(), CV_64FC1);
+
+    const auto *srcStart = src.ptr<uchar>();
+    const auto  srcStep  = src.step[ 0 ];
+    for (int y = 0; y < src.rows; y++) {
+        auto *srcPtr = srcStart + srcStep * y;
+
+        cv::v_float64 prev = cv::vx_setzero_f64();
+        int           x    = 0;
+        for (; x < src.rows - cv::v_uint8::nlanes; x += cv::v_uint8::nlanes) {
+            cv::v_uint16 v1;
+            cv::v_uint16 v2;
+
+            cv::v_expand(cv::v_load(srcPtr + x), v1, v2);
+            v1 += cv::v_rotate_left<1>(v1);
+            v1 += cv::v_rotate_left<2>(v1);
+        }
+    }
+}
+
 #endif
 
 void matchTemplate(cv::Mat &src, cv::Mat &result, const Model *model, int level) {
