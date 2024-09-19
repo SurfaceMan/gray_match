@@ -262,7 +262,7 @@ inline void integralSum(const cv::v_uint16 &src, double *dst, double *prevDst, c
 
     cv::v_uint32 v1;
     cv::v_uint32 v2;
-    cv::v_expand(src, v1, v2);
+    cv::v_expand(sum, v1, v2);
 
     cv::v_uint64 v3;
     cv::v_uint64 v4;
@@ -310,7 +310,7 @@ inline void integralSqSum(cv::v_uint16 &src, double *dst, double *prevDst, cv::v
     integralSqSum(v2, dst + cv::v_uint32::nlanes, prevDst + cv::v_uint32::nlanes, pre);
 }
 
-inline void integralSum(const cv::v_uint16 &v1, cv::v_uint16 &v2, double *dst, double *prevDst,
+inline void integralSum(cv::v_uint16 &v1, cv::v_uint16 &v2, double *dst, double *prevDst,
                         cv::v_uint64 &pre) {
     integralSum(v1, dst, prevDst, pre);
     integralSum(v2, dst + cv::v_uint16::nlanes, prevDst + cv::v_uint16::nlanes, pre);
@@ -363,10 +363,10 @@ void integralSimd(const cv::Mat &src, cv::Mat &sum, cv::Mat &sqSum) {
         for (; x < src.cols; x++) {
             auto val       = srcPtr[ x ];
             auto sqVal     = val * val;
-            sumPtr[ x ]    = prevSum2 + preSumPtr[ x ] + val;
             prevSum2      += val;
-            sqSumPtr[ x ]  = prevSqSum2 + preSqSumPtr[ x ] + sqVal;
+            sumPtr[ x ]    = prevSum2 + preSumPtr[ x ];
             prevSqSum2    += sqVal;
+            sqSumPtr[ x ]  = prevSqSum2 + preSqSumPtr[ x ];
         }
     }
 }
