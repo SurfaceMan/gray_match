@@ -24,6 +24,8 @@ add_library(algo SHARED
     serialize.cpp
     privateType.h
     apiExport.h
+    integral.h
+    integral.cpp
 )
 
 target_include_directories(algo PRIVATE ${OpenCV_INCLUDE_DIRS})
