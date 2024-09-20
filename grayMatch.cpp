@@ -255,6 +255,11 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &
     }
 }
 
+inline void expand(const cv::v_int32 &src, cv::v_float64 &low, cv::v_float64 &high) {
+    low  = cv::v_cvt_f64(src);
+    high = cv::v_cvt_f64_high(src);
+}
+
 inline void integralSum(const cv::v_uint16 &src, double *dst, double *prevDst, cv::v_uint32 &pre) {
     auto sum  = src + cv::v_rotate_left<1>(src);
     sum      += cv::v_rotate_left<2>(sum);
@@ -267,20 +272,17 @@ inline void integralSum(const cv::v_uint16 &src, double *dst, double *prevDst, c
     v2  += pre;
     pre  = cv::v_setall_u32(cv::v_extract_n<cv::v_uint32::nlanes - 1>(v2));
 
-    cv::v_uint64 v3;
-    cv::v_uint64 v4;
-    cv::v_expand(v1, v3, v4);
-    cv::v_store(dst, cv::v_cvt_f64(cv::v_reinterpret_as_s64(v3)) + cv::v_load(prevDst));
-    cv::v_store(dst + cv::v_float64::nlanes, cv::v_cvt_f64(cv::v_reinterpret_as_s64(v4)) +
-                                                 cv::v_load(prevDst + cv::v_float64::nlanes));
+    cv::v_float64 v3;
+    cv::v_float64 v4;
+    expand(cv::v_reinterpret_as_s32(v1), v3, v4);
+    cv::v_store(dst, v3 + cv::v_load(prevDst));
+    cv::v_store(dst + cv::v_float64::nlanes, v4 + cv::v_load(prevDst + cv::v_float64::nlanes));
 
-    cv::v_expand(v2, v3, v4);
+    expand(cv::v_reinterpret_as_s32(v2), v3, v4);
     cv::v_store(dst + cv::v_float64::nlanes * 2,
-                cv::v_cvt_f64(cv::v_reinterpret_as_s64(v3)) +
-                    cv::v_load(prevDst + cv::v_float64::nlanes * 2));
+                v3 + cv::v_load(prevDst + cv::v_float64::nlanes * 2));
     cv::v_store(dst + cv::v_float64::nlanes * 3,
-                cv::v_cvt_f64(cv::v_reinterpret_as_s64(v4)) +
-                    cv::v_load(prevDst + cv::v_float64::nlanes * 3));
+                v4 + cv::v_load(prevDst + cv::v_float64::nlanes * 3));
 }
 
 inline void integralSqSum(cv::v_uint16 &src, double *dst, double *prevDst, cv::v_uint32 &pre) {
@@ -309,20 +311,17 @@ inline void integralSqSum(cv::v_uint16 &src, double *dst, double *prevDst, cv::v
         pre = cv::v_setall_u32(cv::v_extract_n<cv::v_uint32::nlanes - 1>(v2));
     }
 
-    cv::v_uint64 v3;
-    cv::v_uint64 v4;
-    cv::v_expand(v1, v3, v4);
-    cv::v_store(dst, cv::v_cvt_f64(cv::v_reinterpret_as_s64(v3)) + cv::v_load(prevDst));
-    cv::v_store(dst + cv::v_float64::nlanes, cv::v_cvt_f64(cv::v_reinterpret_as_s64(v4)) +
-                                                 cv::v_load(prevDst + cv::v_float64::nlanes));
+    cv::v_float64 v3;
+    cv::v_float64 v4;
+    expand(cv::v_reinterpret_as_s32(v1), v3, v4);
+    cv::v_store(dst, v3 + cv::v_load(prevDst));
+    cv::v_store(dst + cv::v_float64::nlanes, v4 + cv::v_load(prevDst + cv::v_float64::nlanes));
 
-    cv::v_expand(v2, v3, v4);
+    expand(cv::v_reinterpret_as_s32(v2), v3, v4);
     cv::v_store(dst + cv::v_float64::nlanes * 2,
-                cv::v_cvt_f64(cv::v_reinterpret_as_s64(v3)) +
-                    cv::v_load(prevDst + cv::v_float64::nlanes * 2));
+                v3 + cv::v_load(prevDst + cv::v_float64::nlanes * 2));
     cv::v_store(dst + cv::v_float64::nlanes * 3,
-                cv::v_cvt_f64(cv::v_reinterpret_as_s64(v4)) +
-                    cv::v_load(prevDst + cv::v_float64::nlanes * 3));
+                v4 + cv::v_load(prevDst + cv::v_float64::nlanes * 3));
 }
 
 /*
@@ -332,13 +331,12 @@ inline void integralSqSum(cv::v_uint32 &src, double *dst, double *prevDst, cv::v
     src += pre;
     pre  = cv::v_setall_u32(cv::v_extract_n<cv::v_uint32::nlanes - 1>(src));
 
-    cv::v_uint64 v1;
-    cv::v_uint64 v2;
-    cv::v_expand(src, v1, v2);
+    cv::v_float64 v1;
+    cv::v_float64 v2;
+    expand(cv::v_reinterpret_as_s32(src), v1, v2);
 
-    cv::v_store(dst, cv::v_cvt_f64(cv::v_reinterpret_as_s64(v1)) + cv::v_load(prevDst));
-    cv::v_store(dst + cv::v_float64::nlanes, cv::v_cvt_f64(cv::v_reinterpret_as_s64(v2)) +
-                                                 cv::v_load(prevDst + cv::v_float64::nlanes));
+    cv::v_store(dst, v1 + cv::v_load(prevDst));
+    cv::v_store(dst + cv::v_float64::nlanes, v2 + cv::v_load(prevDst + cv::v_float64::nlanes));
 }
 
 inline void integralSqSum(cv::v_uint16 &src, double *dst, double *prevDst, cv::v_uint32 &pre) {
@@ -369,8 +367,8 @@ void integralSimd(const cv::Mat &src, cv::Mat &sum, cv::Mat &sqSum) {
     const auto size = src.size() + cv::Size(1, 1);
     sum.create(size, CV_64FC1);
     sqSum.create(size, CV_64FC1);
-    memset(sum.data, 0, sum.rows * sum.step[ 0 ]);
-    memset(sqSum.data, 0, sqSum.rows * sqSum.step[ 0 ]);
+    memset(sum.data, 0, sum.step[ 0 ]);
+    memset(sqSum.data, 0, sqSum.step[ 0 ]);
 
     const auto *srcStart   = src.ptr<uchar>();
     const auto  srcStep    = src.step[ 0 ];
@@ -385,6 +383,9 @@ void integralSimd(const cv::Mat &src, cv::Mat &sum, cv::Mat &sqSum) {
         auto *sqSumPtr    = sqSumStart + sqSumStep * y;
         auto *preSumPtr   = sumStart + sumStep * (y - 1);
         auto *preSqSumPtr = sqSumStart + sqSumStep * (y - 1);
+
+        sumPtr[ -1 ]   = 0;
+        sqSumPtr[ -1 ] = 0;
 
         cv::v_uint32 prevSum   = cv::vx_setzero_u32();
         cv::v_uint32 prevSqSum = cv::vx_setzero_u32();
