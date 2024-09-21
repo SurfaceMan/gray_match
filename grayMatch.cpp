@@ -235,16 +235,7 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &
                     auto vSrc = cv::v_load(srcPtr + i);
 
 #ifdef __aarch64__
-                    cv::v_uint16 vDot1;
-                    cv::v_uint16 vDot2;
-                    cv::v_uint32 v1;
-                    cv::v_uint32 v2;
-                    cv::v_uint32 v3;
-                    cv::v_uint32 v4;
-                    cv::v_mul_expand(vTem, vSrc, vDot1, vDot2);
-                    cv::v_expand(vDot1, v1, v2);
-                    cv::v_expand(vDot2, v3, v4);
-                    vSum += v1 + v2 + v3 + v4;
+                    vSum += cv::v_dotprod_expand_fast(vSrc, vTem);
 #else
                     vSum += cv::v_dotprod_expand(vSrc, vTem);
 #endif
