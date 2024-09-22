@@ -222,27 +222,32 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &
     const auto  srcStep     = src.step[ 0 ];
     const auto *temStart    = templateImg.ptr<uchar>();
     const auto  temStep     = templateImg.step[ 0 ];
+
+    std::vector<cv::v_uint32> tmp(result.cols, cv::v_setzero_u32());
     for (int y = 0; y < result.rows; y++) {
         auto *resultPtr = resultStart + resultStep * y;
-        for (int x = 0; x < result.cols; x++) {
-            auto vSum = cv::vx_setall_u32(0);
-            for (int templateRow = 0; templateRow < templateImg.rows; templateRow++) {
-                auto *srcPtr = srcStart + srcStep * (y + templateRow) + x;
-                auto *temPtr = temStart + temStep * templateRow;
 
-                for (int i = 0; i < templateImg.cols; i += cv::v_uint8::nlanes) {
-                    auto vTem = cv::v_load_aligned(temPtr + i);
-                    auto vSrc = cv::v_load(srcPtr + i);
+        for (int templateRow = 0; templateRow < templateImg.rows; templateRow++) {
+            auto *temPtr = temStart + temStep * templateRow;
 
+            for (int i = 0; i < templateImg.cols; i += cv::v_uint8::nlanes) {
+                auto  vTem   = cv::v_load_aligned(temPtr + i);
+                auto *srcPtr = srcStart + srcStep * (y + templateRow) + i;
+
+                for (int x = 0; x < result.cols; x++) {
+                    auto vSrc = cv::v_load(srcPtr + x);
 #ifdef __aarch64__
                     vSum += cv::v_dotprod_expand_fast(vSrc, vTem);
 #else
-                    vSum += cv::v_dotprod_expand(vSrc, vTem);
+                    tmp[ x ] += cv::v_dotprod_expand(vSrc, vTem);
 #endif
                 }
             }
+        }
 
-            auto sum       = cv::v_reduce_sum(vSum);
+        for (int x = 0; x < result.cols; x++) {
+            auto sum       = cv::v_reduce_sum(tmp[ x ]);
+            tmp[ x ]       = cv::v_setzero_u32();
             resultPtr[ x ] = static_cast<float>(sum);
         }
     }
