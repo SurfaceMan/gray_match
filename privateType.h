@@ -33,3 +33,9 @@ struct Model {
         equal1.reserve(size);
     }
 };
+
+#if CV_VERSION_MAJOR >= 4 && CV_VERSION_MINOR >= 8
+#define simdSize(type) cv::VTraits<type>::nlanes
+#else
+#define simdSize(type) type::nlanes
+#endif

@@ -230,7 +230,7 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &
         for (int templateRow = 0; templateRow < templateImg.rows; templateRow++) {
             auto *temPtr = temStart + temStep * templateRow;
 
-            for (int i = 0; i < templateImg.cols; i += cv::v_uint8::nlanes) {
+            for (int i = 0; i < templateImg.cols; i += simdSize(cv::v_uint8)) {
                 auto  vTem   = cv::v_load_aligned(temPtr + i);
                 auto *srcPtr = srcStart + srcStep * (y + templateRow) + i;
 
@@ -460,7 +460,7 @@ Model *trainModel(const cv::Mat &src, int level) {
     model.reserve(pyramids.size());
 
     for (const auto &pyramid : pyramids) {
-        int     alignedWidth = static_cast<int>(cv::alignSize(pyramid.cols, cv::v_uint8::nlanes));
+        int     alignedWidth = static_cast<int>(cv::alignSize(pyramid.cols, simdSize(cv::v_uint8)));
         auto    img          = cv::Mat::zeros(pyramid.rows, alignedWidth, CV_8UC1);
         cv::Mat sub          = img(cv::Rect(0, 0, pyramid.cols, pyramid.rows));
         for (int y = 0; y < pyramid.rows; y++) {
