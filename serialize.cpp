@@ -139,7 +139,7 @@ public:
         memcpy(&height, m_data + m_size, sizeof(int));
         m_size += static_cast<int>(sizeof(int));
 
-        int  alignedWidth = static_cast<int>(cv::alignSize(width, cv::v_uint8::nlanes));
+        int  alignedWidth = static_cast<int>(cv::alignSize(width, simdSize(cv::v_uint8)));
         auto img          = cv::Mat::zeros(height, alignedWidth, CV_8UC1);
         val               = img(cv::Rect(0, 0, width, height));
 
