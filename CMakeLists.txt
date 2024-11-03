@@ -34,6 +34,7 @@ target_compile_options(algo PRIVATE
         $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX /external:W0>
         $<$<STREQUAL:${CMAKE_SYSTEM_NAME},Linux>: -fPIC -fvisibility=hidden -Wl,--exclude-libs,ALL -Wall -Wextra -Wpedantic -Wmisleading-indentation -Wunused -Wuninitialized -Wshadow -Wconversion -Werror>
         $<$<AND:$<CXX_COMPILER_ID:Clang>,$<STREQUAL:${CMAKE_SYSTEM_NAME},Windows>>:/W4 /WX /external:W0>
+        #$<$<AND:$<CXX_COMPILER_ID:Clang>,$<STREQUAL:${CMAKE_SYSTEM_NAME},Darwin>>: -fPIC -fvisibility=hidden -Wall -Wextra -Wpedantic -Wmisleading-indentation -Wunused -Wuninitialized -Wshadow -Wconversion -Werror>
         $<$<STREQUAL:${CMAKE_SYSTEM_PROCESSOR},loongarch64>:-mlsx>
 )
 target_compile_definitions(algo PUBLIC API_EXPORTS
