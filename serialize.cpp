@@ -199,9 +199,9 @@ bool serialize(const Model_t model, unsigned char *buffer, int *size) {
 
     SizeCountBuffer counter(buffer);
     operation(&counter, *model);
-    *size = counter.count();
 
     if (nullptr == buffer) {
+        *size = counter.count();
         return true;
     }
 
