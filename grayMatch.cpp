@@ -571,6 +571,48 @@ std::vector<Candidate> matchTopLevel(const cv::Mat &dstTop, double startAngle, d
     return candidates;
 }
 
+cv::Point2f computeSubpixel(const cv::Mat &score) {
+    cv::Point2f result(0, 0);
+    auto       *mag = score.ptr<float>();
+
+    auto gx  = (-mag[ 0 ] + mag[ 2 ] - mag[ 3 ] + mag[ 5 ] - mag[ 6 ] + mag[ 8 ]) / 6.0;
+    auto gy  = (mag[ 6 ] + mag[ 7 ] + mag[ 8 ] - mag[ 0 ] - mag[ 1 ] - mag[ 2 ]) / 6.0;
+    auto gxx = (mag[ 0 ] - 2.0 * mag[ 1 ] + mag[ 2 ] + mag[ 3 ] - 2.0 * mag[ 4 ] + mag[ 5 ] +
+                mag[ 6 ] - 2.0 * mag[ 7 ] + mag[ 8 ]) /
+               6.0 * 2.;
+    auto gxy = (-mag[ 0 ] + mag[ 2 ] + mag[ 6 ] - mag[ 8 ]) / 4.0;
+    auto gyy = (mag[ 0 ] + mag[ 1 ] + mag[ 2 ] - 2.0 * (mag[ 3 ] + mag[ 4 ] + mag[ 5 ]) + mag[ 6 ] +
+                mag[ 7 ] + mag[ 8 ]) /
+               6.0 * 2.;
+
+    cv::Mat hessian(2, 2, CV_32FC1);
+    hessian.at<float>(0, 0) = gxx;
+    hessian.at<float>(0, 1) = gxy;
+    hessian.at<float>(1, 0) = gxy;
+    hessian.at<float>(1, 1) = gyy;
+
+    cv::Mat eigenvalue;
+    cv::Mat eigenvector;
+    cv::eigen(hessian, eigenvalue, eigenvector);
+    double nx, ny;
+    if (fabs(eigenvalue.at<float>(0, 0)) >= fabs(eigenvalue.at<float>(1, 0))) {
+        nx = eigenvector.at<float>(0, 0);
+        ny = eigenvector.at<float>(0, 1);
+    } else {
+        nx = eigenvector.at<float>(1, 0);
+        ny = eigenvector.at<float>(1, 1);
+    }
+
+    double denominator = gxx * nx * nx + 2 * gxy * nx * ny + gyy * ny * ny;
+    if (denominator != 0.0) {
+        auto t   = -(gx * nx + gy * ny) / denominator;
+        result.x = t * nx;
+        result.y = t * ny;
+    }
+
+    return result;
+}
+
 std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
                                       const std::vector<Candidate> &candidates, double minScore,
                                       int subpixel, const Model *model, int level) {
@@ -633,7 +675,9 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
             }
 
             if (!newScoreRect.empty()) {
-                // TODO subpixel
+                auto offset         = computeSubpixel(newScoreRect);
+                newCandidate.pos.x += offset.x;
+                newCandidate.pos.y += offset.y;
             }
 
             // back to
