@@ -575,15 +575,15 @@ cv::Point2f computeSubpixel(const cv::Mat &score) {
     cv::Point2f result(0, 0);
     auto       *mag = score.ptr<float>();
 
-    auto gx  = (-mag[ 0 ] + mag[ 2 ] - mag[ 3 ] + mag[ 5 ] - mag[ 6 ] + mag[ 8 ]) / 6.0;
-    auto gy  = (mag[ 6 ] + mag[ 7 ] + mag[ 8 ] - mag[ 0 ] - mag[ 1 ] - mag[ 2 ]) / 6.0;
-    auto gxx = (mag[ 0 ] - 2.0 * mag[ 1 ] + mag[ 2 ] + mag[ 3 ] - 2.0 * mag[ 4 ] + mag[ 5 ] +
-                mag[ 6 ] - 2.0 * mag[ 7 ] + mag[ 8 ]) /
-               6.0 * 2.;
-    auto gxy = (-mag[ 0 ] + mag[ 2 ] + mag[ 6 ] - mag[ 8 ]) / 4.0;
-    auto gyy = (mag[ 0 ] + mag[ 1 ] + mag[ 2 ] - 2.0 * (mag[ 3 ] + mag[ 4 ] + mag[ 5 ]) + mag[ 6 ] +
-                mag[ 7 ] + mag[ 8 ]) /
-               6.0 * 2.;
+    auto gx  = (-mag[ 0 ] + mag[ 2 ] - mag[ 3 ] + mag[ 5 ] - mag[ 6 ] + mag[ 8 ]) / 3.0f;
+    auto gy  = (mag[ 6 ] + mag[ 7 ] + mag[ 8 ] - mag[ 0 ] - mag[ 1 ] - mag[ 2 ]) / 3.0f;
+    auto gxx = (mag[ 0 ] - 2.0f * mag[ 1 ] + mag[ 2 ] + mag[ 3 ] - 2.0f * mag[ 4 ] + mag[ 5 ] +
+                mag[ 6 ] - 2.0f * mag[ 7 ] + mag[ 8 ]) /
+               6.0f;
+    auto gxy = (-mag[ 0 ] + mag[ 2 ] + mag[ 6 ] - mag[ 8 ]) / 2.0f;
+    auto gyy = (mag[ 0 ] + mag[ 1 ] + mag[ 2 ] - 2.0f * (mag[ 3 ] + mag[ 4 ] + mag[ 5 ]) +
+                mag[ 6 ] + mag[ 7 ] + mag[ 8 ]) /
+               6.0f;
 
     cv::Mat hessian(2, 2, CV_32FC1);
     hessian.at<float>(0, 0) = gxx;
@@ -594,7 +594,7 @@ cv::Point2f computeSubpixel(const cv::Mat &score) {
     cv::Mat eigenvalue;
     cv::Mat eigenvector;
     cv::eigen(hessian, eigenvalue, eigenvector);
-    double nx, ny;
+    float nx, ny;
     if (fabs(eigenvalue.at<float>(0, 0)) >= fabs(eigenvalue.at<float>(1, 0))) {
         nx = eigenvector.at<float>(0, 0);
         ny = eigenvector.at<float>(0, 1);
@@ -603,7 +603,7 @@ cv::Point2f computeSubpixel(const cv::Mat &score) {
         ny = eigenvector.at<float>(1, 1);
     }
 
-    double denominator = gxx * nx * nx + 2 * gxy * nx * ny + gyy * ny * ny;
+    auto denominator = gxx * nx * nx + 2 * gxy * nx * ny + gyy * ny * ny;
     if (denominator != 0.0) {
         auto t   = -(gx * nx + gy * ny) / denominator;
         result.x = t * nx;
