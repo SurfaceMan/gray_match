@@ -6,6 +6,7 @@
  3. support model save/load as binary file
  4. provide pure c interface
  5. support openmp
+ 6. position with 3x3 subpixel interpolation
  
 ## usage:
 all you need can be found in [main.cpp](main.cpp)
