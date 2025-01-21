@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.12)
 
 project(match)
-find_package(OpenCV REQUIRED)
+find_package(OpenCV 4.8 REQUIRED)
 
 option(ENABLE_OPENMP "enable openmp" OFF)
 if(ENABLE_OPENMP)
