@@ -237,9 +237,9 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &
                 for (int x = 0; x < result.cols; x++) {
                     auto vSrc = cv::v_load(srcPtr + x);
 #ifdef __aarch64__
-                    tmp[ x ] += cv::v_dotprod_expand_fast(vSrc, vTem);
+                    tmp[ x ] = cv::v_add(tmp[ x ], cv::v_dotprod_expand_fast(vSrc, vTem));
 #else
-                    tmp[ x ] += cv::v_dotprod_expand(vSrc, vTem);
+                    tmp[ x ] = cv::v_add(tmp[ x ], tmp[ x ] += cv::v_dotprod_expand(vSrc, vTem));
 #endif
                 }
             }
