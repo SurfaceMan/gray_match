@@ -253,8 +253,8 @@ cv::Rect2d boundingRect(const std::vector<cv::Point2d> &points) {
 
 inline void computeLine(const uchar *kernel, const uchar *src, const int kernelWidth,
                         uint64_t &dot) {
-    constexpr auto blockSize = cv::v_uint8::nlanes;
-    auto           vDot      = cv::vx_setall_u32(0);
+    constexpr auto blockSize = simdSize(cv::v_uint8);
+    auto           vDot      = cv::vx_setzero_u32();
     int            i         = 0;
     for (; i < kernelWidth - blockSize; i += blockSize) {
         vDot += cv::v_dotprod_expand(cv::v_load(kernel + i), cv::v_load(src + i));
