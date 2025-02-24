@@ -257,7 +257,8 @@ inline void computeLine(const uchar *kernel, const uchar *src, const int kernelW
     auto           vDot      = cv::vx_setzero_u32();
     int            i         = 0;
     for (; i < kernelWidth - blockSize; i += blockSize) {
-        vDot += cv::v_dotprod_expand(cv::v_load(kernel + i), cv::v_load(src + i));
+        vDot =
+            cv::v_add(vDot, cv::v_dotprod_expand_fast(cv::v_load(kernel + i), cv::v_load(src + i)));
     }
     dot += cv::v_reduce_sum(vDot);
 
