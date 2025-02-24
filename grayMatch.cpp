@@ -1,4 +1,6 @@
 #include "grayMatch.h"
+#include "privateType.h"
+#include "sum.h"
 
 #include <opencv2/core/hal/intrin.hpp>
 
@@ -125,40 +127,6 @@ struct Candidate {
     }
 };
 
-struct RLE {
-    int row         = -1;
-    int startColumn = -1;
-    int length      = 0;
-};
-
-using Region = std::vector<RLE>;
-
-struct Template {
-    cv::Mat         img;
-    Region          region;
-    cv::RotatedRect rect;
-
-    double mean    = 0;
-    double normal  = 0;
-    double invArea = 0;
-};
-
-struct Layer {
-    double angleStep = 0;
-
-    std::vector<Template> templates;
-};
-
-struct Model {
-    double startAngle  = 0;
-    double stopAngle   = 0;
-    double angleStep   = 0;
-    uchar  borderColor = 0;
-
-    cv::Mat            source;
-    std::vector<Layer> layers;
-};
-
 inline void RotatedRectPoints(const cv::RotatedRect &rect, cv::Point2f pt[]) {
     const auto angle = -rect.angle * CV_PI / 180.;
     const auto b     = static_cast<float>(cos(angle)) * 0.5f;
@@ -283,46 +251,44 @@ cv::Rect2d boundingRect(const std::vector<cv::Point2d> &points) {
 
 #ifdef CV_SIMD
 
-void computeLine(const uchar *kernel, const uchar *src, const int kernelWidth, uint64_t &dot,
-                 uint64_t &sum, uint64_t &sqSum) {
+inline void computeLine(const uchar *kernel, const uchar *src, const int kernelWidth,
+                        uint64_t &dot) {
     constexpr auto blockSize = cv::v_uint8::nlanes;
     auto           vDot      = cv::vx_setall_u32(0);
-    auto           vsqSum    = cv::vx_setall_u32(0);
     int            i         = 0;
     for (; i < kernelWidth - blockSize; i += blockSize) {
-        auto vSrc  = cv::v_load(src + i);
-        sum       += cv::v_reduce_sum(vSrc);
-        vsqSum    += cv::v_dotprod_expand(vSrc, vSrc);
-        vDot      += cv::v_dotprod_expand(cv::v_load(kernel + i), vSrc);
+        vDot += cv::v_dotprod_expand(cv::v_load(kernel + i), cv::v_load(src + i));
     }
-    dot   += cv::v_reduce_sum(vDot);
-    sqSum += cv::v_reduce_sum(vsqSum);
+    dot += cv::v_reduce_sum(vDot);
 
     for (; i < kernelWidth; i++) {
-        dot   += kernel[ i ] * src[ i ];
-        sum   += src[ i ];
-        sqSum += src[ i ] * src[ i ];
+        dot += kernel[ i ] * src[ i ];
     }
 }
 
-void drawRegion(cv::Mat &src, const Region &region);
-
-void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const Region &region,
-                       cv::Mat &result, const double mean, const double normal,
-                       const double invArea) {
+void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const HRegion &hRegion,
+                       const VRegion &vRegion, cv::Mat &result, const double mean,
+                       const double normal, const double invArea) {
     result = cv::Mat::zeros(src.size() - templateImg.size() + cv::Size(1, 1), CV_32FC1);
+
+    cv::Mat sumImg;
+    cv::Mat sqSumImg;
+    integralSum(src, sumImg, sqSumImg, templateImg.size(), hRegion, vRegion);
 
     for (int y = 0; y < result.rows; y++) {
         auto *resultPtr = result.ptr<float>(y);
+        auto *sumPtr    = sumImg.ptr<double>(y);
+        auto *sqSumPtr  = sqSumImg.ptr<double>();
         for (int x = 0; x < result.cols; x++) {
-            auto    &score = resultPtr[ x ];
-            uint64_t dot   = 0;
-            uint64_t sum   = 0;
-            uint64_t sqSum = 0;
-            for (const auto &rle : region) {
+            auto      &score = resultPtr[ x ];
+            const auto sum   = sumPtr[ x ];
+            const auto sqSum = sqSumPtr[ x ];
+
+            uint64_t dot = 0;
+            for (const auto &rle : hRegion) {
                 auto *srcPtr = src.ptr<uchar>(y + rle.row) + x + rle.startColumn;
                 auto *temPtr = templateImg.ptr<uchar>(rle.row) + rle.startColumn;
-                computeLine(temPtr, srcPtr, rle.length, dot, sum, sqSum);
+                computeLine(temPtr, srcPtr, rle.length, dot);
             }
 
             const auto numerator = static_cast<double>(dot) - static_cast<double>(sum) * mean;
@@ -348,8 +314,8 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const Reg
 
 void matchTemplate(const cv::Mat &src, cv::Mat &result, const Template &layerTemplate) {
 #ifdef CV_SIMD
-    matchTemplateSimd(src, layerTemplate.img, layerTemplate.region, result, layerTemplate.mean,
-                      layerTemplate.normal, layerTemplate.invArea);
+    matchTemplateSimd(src, layerTemplate.img, layerTemplate.hRegion, layerTemplate.vRegion, result,
+                      layerTemplate.mean, layerTemplate.normal, layerTemplate.invArea);
 
 #else
     // make mask at train model process
@@ -449,15 +415,19 @@ void filterOverlap(std::vector<Candidate> &candidates, const std::vector<cv::Rot
     }
 }
 
-Region borderRegion(const cv::Mat &src) {
-    Region result;
+HRegion horizonRegion(const cv::Mat &src) {
+    HRegion result;
 
     for (int y = 0; y < src.rows; y++) {
         auto *ptr    = src.ptr<uchar>(y);
         bool  inside = false;
-        RLE   rle;
+        HRLE  rle;
         for (int x = 0; x < src.cols; x++) {
             if (0 == ptr[ x ]) {
+                if (inside) {
+                    break;
+                }
+
                 continue;
             }
 
@@ -480,20 +450,48 @@ Region borderRegion(const cv::Mat &src) {
     return result;
 }
 
-int regionArea(const Region &region) {
+VRegion verticalRegion(const cv::Mat &src) {
+    VRegion result;
+
+    for (int x = 0; x < src.cols; x++) {
+        auto *ptr    = src.ptr<uchar>() + x;
+        bool  inside = false;
+        VRLE  rle;
+        for (int y = 0; y < src.rows; y++) {
+            if (0 == ptr[ y * src.step ]) {
+                if (inside) {
+                    break;
+                }
+
+                continue;
+            }
+
+            if (!inside) {
+                inside       = true;
+                rle.col      = x;
+                rle.startRow = y;
+                rle.length   = 1;
+                continue;
+            }
+
+            rle.length++;
+        }
+
+        if (inside) {
+            result.push_back(rle);
+        }
+    }
+
+    return result;
+}
+
+int regionArea(const HRegion &region) {
     int area = 0;
     for (const auto &rle : region) {
         area += rle.length;
     }
 
     return area;
-}
-
-void drawRegion(cv::Mat &src, const Region &region) {
-    for (const auto &rle : region) {
-        auto *ptr = src.ptr<uchar>(rle.row) + rle.startColumn;
-        memset(ptr, 255, rle.length);
-    }
 }
 
 double normalizeAngle(const double angle) {
@@ -584,7 +582,8 @@ Model *trainModel(const cv::Mat &src, int level, double startAngle, double spanA
                                cv::Scalar(255));
 
             // draw rotated rect line, then encode with run-length-encode
-            layerTemplate.region = borderRegion(roi);
+            layerTemplate.hRegion = horizonRegion(roi);
+            layerTemplate.vRegion = verticalRegion(roi);
             cv::bitwise_and(rotated, roi, rotated);
 
             cv::Scalar mean;
@@ -592,7 +591,7 @@ Model *trainModel(const cv::Mat &src, int level, double startAngle, double spanA
             cv::meanStdDev(rotated, mean, stdDev, roi);
             const auto &stdDevVal = stdDev[ 0 ];
 
-            layerTemplate.invArea = 1. / regionArea(borderRegion(roi));
+            layerTemplate.invArea = 1. / regionArea(layerTemplate.hRegion);
             layerTemplate.normal  = stdDevVal / sqrt(layerTemplate.invArea);
             layerTemplate.mean    = mean[ 0 ];
 
@@ -600,10 +599,6 @@ Model *trainModel(const cv::Mat &src, int level, double startAngle, double spanA
         }
 
         model.layers.emplace_back(std::move(layer));
-    }
-
-    if (!model.layers.empty()) {
-        model.borderColor = model.layers.front().templates.front().mean > 128 ? 0 : 255;
     }
 
     return result;

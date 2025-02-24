@@ -6,6 +6,9 @@ add_executable(${PROJECT_NAME}
     main.cpp
     grayMatch.h
     grayMatch.cpp
+    sum.h
+    sum.cpp
+    privateType.h
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${OpenCV_INCLUDE_DIRS})
