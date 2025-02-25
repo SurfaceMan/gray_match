@@ -30,14 +30,14 @@ inline void computeSum(const cv::v_uint8x16 &src, cv::v_uint32x4 &sum, cv::v_uin
 
 void computeSum(const cv::Mat &src, const HRegion &hRegion, uint64 &sum, uint64 &sqSum) {
     constexpr auto blockSize = simdSize(cv::v_uint8);
-
+    auto          *srcPtr    = src.ptr<uchar>();
     cv::v_uint32x4 vSum      = cv::v_setzero_u32();
     cv::v_uint64x2 vSqSum    = cv::v_setzero_u64();
     uint32_t       partSum   = 0;
     uint64         partSqSum = 0;
 
     for (const auto &rle : hRegion) {
-        auto *ptr = src.ptr<uchar>(rle.row) + rle.startColumn;
+        auto *ptr = srcPtr + src.step * rle.row + rle.startColumn;
 
         int i = 0;
         for (; i < rle.length - blockSize; i += blockSize) {
@@ -207,7 +207,7 @@ void shiftV(const cv::Mat &src, const VRegion &vRegion, int row, cv::Mat &sum, c
     }
 
     sumPtr[ 0 ]   = *(sumPtr - sum.step1()) + partSum;
-    sqSumPtr[ 0 ] = *(sqSumPtr - sum.step1()) + partSqSum;
+    sqSumPtr[ 0 ] = *(sqSumPtr - sqSum.step1()) + partSqSum;
 }
 
 void integralSum(const cv::Mat &src, cv::Mat &sum, cv::Mat &sqSum, const cv::Size &templateSize,

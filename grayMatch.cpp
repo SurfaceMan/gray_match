@@ -251,20 +251,35 @@ cv::Rect2d boundingRect(const std::vector<cv::Point2d> &points) {
 
 #ifdef CV_SIMD
 
-inline void computeLine(const uchar *kernel, const uchar *src, const int kernelWidth,
-                        uint64_t &dot) {
+uint64_t v_dot(const uchar *src, std::size_t srcStep, const uchar *temp, std::size_t tempStep,
+               int x, int y, const HRegion &region) {
     constexpr auto blockSize = simdSize(cv::v_uint8);
-    auto           vDot      = cv::vx_setzero_u32();
-    int            i         = 0;
-    for (; i < kernelWidth - blockSize; i += blockSize) {
-        vDot =
-            cv::v_add(vDot, cv::v_dotprod_expand_fast(cv::v_load(kernel + i), cv::v_load(src + i)));
-    }
-    dot += cv::v_reduce_sum(vDot);
 
-    for (; i < kernelWidth; i++) {
-        dot += kernel[ i ] * src[ i ];
+    uint32_t partDot  = 0;
+    auto     partVDot = cv::v_setzero_u32();
+    for (const auto &rle : region) {
+        auto *srcPtr  = src + (y + rle.row) * srcStep + x + rle.startColumn;
+        auto *tempPtr = temp + rle.row * tempStep + rle.startColumn;
+
+        int i = 0;
+        for (; i < rle.length - blockSize; i += blockSize) {
+            auto vSrc  = cv::v_load(srcPtr + i);
+            auto vTemp = cv::v_load(tempPtr + i);
+
+#ifdef __aarch64__
+            partVDot = cv::v_add(partVDot, cv::v_dotprod_expand_fast(vSrc, vTemp));
+#else
+            partVDot = cv::v_add(partVDot, cv::v_dotprod_expand(vSrc, vTemp));
+#endif
+        }
+
+        for (; i < rle.length; i++) {
+            partDot += *(srcPtr + i) * *(tempPtr + i);
+        }
     }
+
+    auto sum = cv::v_add(cv::v_expand_low(partVDot), cv::v_expand_high(partVDot));
+    return cv::v_reduce_sum(sum) + partDot;
 }
 
 void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const HRegion &hRegion,
@@ -276,21 +291,23 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const HRe
     cv::Mat sqSumImg;
     integralSum(src, sumImg, sqSumImg, templateImg.size(), hRegion, vRegion);
 
+    auto *srcStartPtr      = src.ptr<uchar>();
+    auto *tempStartPtr     = templateImg.ptr<uchar>();
+    auto *resultStartPtr   = result.ptr<float>();
+    auto *sumImgStartPtr   = sumImg.ptr<double>();
+    auto *sqSumImgStartPtr = sqSumImg.ptr<double>();
+
     for (int y = 0; y < result.rows; y++) {
-        auto *resultPtr = result.ptr<float>(y);
-        auto *sumPtr    = sumImg.ptr<double>(y);
-        auto *sqSumPtr  = sqSumImg.ptr<double>();
+        auto *resultPtr = resultStartPtr + y * result.step1();
+        auto *sumPtr    = sumImgStartPtr + y * sumImg.step1();
+        auto *sqSumPtr  = sqSumImgStartPtr + y * sqSumImg.step1();
         for (int x = 0; x < result.cols; x++) {
             auto      &score = resultPtr[ x ];
             const auto sum   = sumPtr[ x ];
             const auto sqSum = sqSumPtr[ x ];
 
-            uint64_t dot = 0;
-            for (const auto &rle : hRegion) {
-                auto *srcPtr = src.ptr<uchar>(y + rle.row) + x + rle.startColumn;
-                auto *temPtr = templateImg.ptr<uchar>(rle.row) + rle.startColumn;
-                computeLine(temPtr, srcPtr, rle.length, dot);
-            }
+            uint64_t dot =
+                v_dot(srcStartPtr, src.step, tempStartPtr, templateImg.step, x, y, hRegion);
 
             const auto numerator = static_cast<double>(dot) - static_cast<double>(sum) * mean;
 
