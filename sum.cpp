@@ -57,86 +57,64 @@ void computeSum(const cv::Mat &src, const HRegion &hRegion, uint64 &sum, uint64 
 }
 
 inline void computeSumDiff(const cv::v_uint16x8 &start, const cv::v_uint16x8 &end,
-                           cv::v_int32x4 &diff0, cv::v_int32x4 &diff1, cv::v_int32x4 &base) {
+                           cv::v_int32x4 &diff0, cv::v_int32x4 &diff1) {
     cv::v_int16x8 sub;
     {
         cv::v_int16x8 vStart = cv::v_reinterpret_as_s16(start);
         cv::v_int16x8 vEnd   = cv::v_reinterpret_as_s16(end);
         sub                  = cv::v_sub(vEnd, vStart);
-        sub                  = cv::v_add(sub, cv::v_rotate_left<1>(sub));
-        sub                  = cv::v_add(sub, cv::v_rotate_left<2>(sub));
-        sub                  = cv::v_add(sub, cv::v_rotate_left<4>(sub));
     }
 
     cv::v_int32x4 val = cv::v_expand_low(sub);
-    val               = cv::v_add(val, base);
     diff0             = cv::v_add(diff0, val);
-    base              = cv::v_setall_s32(cv::v_extract_n<simdSize(cv::v_int32) - 1>(diff0));
 
     val   = cv::v_expand_high(sub);
-    val   = cv::v_add(val, base);
     diff1 = cv::v_add(diff1, val);
-    base  = cv::v_setall_s32(cv::v_extract_highest(diff1));
 }
 
 inline void computeSumDiff(const cv::v_uint8x16 &start, const cv::v_uint8x16 &end,
                            cv::v_int32x4 &diff0, cv::v_int32x4 &diff1, cv::v_int32x4 &diff2,
                            cv::v_int32x4 &diff3) {
-    auto base = cv::v_setzero_s32();
-    computeSumDiff(cv::v_expand_low(start), cv::v_expand_low(end), diff0, diff1, base);
-    computeSumDiff(cv::v_expand_high(start), cv::v_expand_high(end), diff2, diff3, base);
+    computeSumDiff(cv::v_expand_low(start), cv::v_expand_low(end), diff0, diff1);
+    computeSumDiff(cv::v_expand_high(start), cv::v_expand_high(end), diff2, diff3);
 }
 
 inline void computeSqSumDiff(const cv::v_uint32x4 &start, const cv::v_uint32x4 &end,
-                             cv::v_int32x4 &diff0, cv::v_int32x4 &base) {
+                             cv::v_int32x4 &diff0) {
     cv::v_int32x4 vStart = cv::v_reinterpret_as_s32(start);
     cv::v_int32x4 vEnd   = cv::v_reinterpret_as_s32(end);
 
     cv::v_int32x4 sub = cv::v_sub(vEnd, vStart);
-    sub               = cv::v_add(sub, cv::v_rotate_left<1>(sub));
-    sub               = cv::v_add(sub, cv::v_rotate_left<2>(sub));
-
-    sub   = cv::v_add(sub, base);
-    diff0 = cv::v_add(diff0, sub);
-    base  = cv::v_setall_s32(cv::v_extract_highest(diff0));
+    diff0             = cv::v_add(diff0, sub);
 }
 
 inline void computeSqSumDiff(cv::v_uint16x8 &start, cv::v_uint16x8 &end, cv::v_int32x4 &diff0,
-                             cv::v_int32x4 &diff1, cv::v_int32x4 &base) {
+                             cv::v_int32x4 &diff1) {
     start = cv::v_mul(start, start);
     end   = cv::v_mul(end, end);
 
-    computeSqSumDiff(cv::v_expand_low(start), cv::v_expand_low(end), diff0, base);
-    computeSqSumDiff(cv::v_expand_high(start), cv::v_expand_high(end), diff1, base);
+    computeSqSumDiff(cv::v_expand_low(start), cv::v_expand_low(end), diff0);
+    computeSqSumDiff(cv::v_expand_high(start), cv::v_expand_high(end), diff1);
 }
 
 inline void computeSqSumDiff(const cv::v_uint8x16 &start, const cv::v_uint8x16 &end,
                              cv::v_int32x4 &diff0, cv::v_int32x4 &diff1, cv::v_int32x4 &diff2,
                              cv::v_int32x4 &diff3) {
-    auto base = cv::v_setzero_s32();
 
     auto vStart = cv::v_expand_low(start);
     auto vEnd   = cv::v_expand_low(end);
-    computeSqSumDiff(vStart, vEnd, diff0, diff1, base);
+    computeSqSumDiff(vStart, vEnd, diff0, diff1);
 
     vStart = cv::v_expand_high(start);
     vEnd   = cv::v_expand_high(end);
-    computeSqSumDiff(vStart, vEnd, diff2, diff3, base);
+    computeSqSumDiff(vStart, vEnd, diff2, diff3);
 }
 
-inline void v_expand_store(double *ptr, const cv::v_int32x4 &val, double &base) {
-    auto vBase = cv::v_setall_f64(base);
-
-    auto tmp = cv::v_reinterpret_as_f64(cv::v_expand_low(val));
-    tmp      = cv::v_add(tmp, vBase);
-    cv::v_store(ptr, tmp);
-    vBase = cv::v_setall_f64(cv::v_extract_highest(tmp));
-
-    tmp = cv::v_reinterpret_as_f64(cv::v_expand_high(val));
-    tmp = cv::v_add(tmp, vBase);
-    cv::v_store(ptr + 2, tmp);
-
-    base = cv::v_extract_highest(tmp);
+inline void v_expand_store(double *ptr, const std::array<int, 4> &val) {
+    ptr[ 0 ] = ptr[ -1 ] + val[ 0 ];
+    ptr[ 1 ] = ptr[ 0 ] + val[ 1 ];
+    ptr[ 2 ] = ptr[ 1 ] + val[ 2 ];
+    ptr[ 3 ] = ptr[ 2 ] + val[ 3 ];
 }
 
 void shiftH(const cv::Mat &src, const HRegion &hRegion, int row, cv::Mat &sum, cv::Mat &sqSum) {
@@ -145,8 +123,7 @@ void shiftH(const cv::Mat &src, const HRegion &hRegion, int row, cv::Mat &sum, c
     auto          *sumPtr    = sum.ptr<double>(row);
     auto          *sqSumPtr  = sqSum.ptr<double>(row);
 
-    double sumBase   = *sumPtr;
-    double sqSumBase = *sqSumPtr;
+    std::array<int, 4> buf;
 
     int i = 1;
     for (; i < sum.cols - blockSize; i += blockSize) {
@@ -171,16 +148,24 @@ void shiftH(const cv::Mat &src, const HRegion &hRegion, int row, cv::Mat &sum, c
         }
 
         auto *sumPtrStart = sumPtr + i;
-        v_expand_store(sumPtrStart, diff0, sumBase);
-        v_expand_store(sumPtrStart + 4, diff1, sumBase);
-        v_expand_store(sumPtrStart + 8, diff2, sumBase);
-        v_expand_store(sumPtrStart + 12, diff3, sumBase);
+        cv::v_store(buf.data(), diff0);
+        v_expand_store(sumPtrStart, buf);
+        cv::v_store(buf.data(), diff1);
+        v_expand_store(sumPtrStart + 4, buf);
+        cv::v_store(buf.data(), diff2);
+        v_expand_store(sumPtrStart + 8, buf);
+        cv::v_store(buf.data(), diff3);
+        v_expand_store(sumPtrStart + 12, buf);
 
         auto *sqSumPtrStart = sqSumPtr + i;
-        v_expand_store(sqSumPtrStart, diff10, sqSumBase);
-        v_expand_store(sqSumPtrStart + 4, diff11, sqSumBase);
-        v_expand_store(sqSumPtrStart + 8, diff12, sqSumBase);
-        v_expand_store(sqSumPtrStart + 12, diff13, sqSumBase);
+        cv::v_store(buf.data(), diff10);
+        v_expand_store(sqSumPtrStart, buf);
+        cv::v_store(buf.data(), diff11);
+        v_expand_store(sqSumPtrStart + 4, buf);
+        cv::v_store(buf.data(), diff12);
+        v_expand_store(sqSumPtrStart + 8, buf);
+        cv::v_store(buf.data(), diff13);
+        v_expand_store(sqSumPtrStart + 12, buf);
     }
 
     for (; i < sum.cols; i++) {
