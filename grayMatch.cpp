@@ -191,23 +191,8 @@ inline cv::Point2d transform(const cv::Point2d &point, const cv::Mat &rotate) {
     return {x, y};
 }
 
-inline cv::Point2d transform(const cv::Point2d &point, const cv::Point &center, double angle) {
-    const auto rotate = cv::getRotationMatrix2D(center, angle, 1.);
-
-    return transform(point, rotate);
-}
-
 inline cv::Point2d sizeCenter(const cv::Size &size) {
     return {(size.width - 1.) / 2., (size.height - 1.) / 2.};
-}
-
-inline cv::Point2d sizeCenter(const cv::Size2d &size) {
-    return {(size.width - 1.) / 2., (size.height - 1.) / 2.};
-}
-
-inline double sizeAngleStep(const cv::Size &size) {
-    const auto diameter = sqrt(size.width * size.width + size.height * size.height);
-    return atan(2. / diameter) * 180. / CV_PI;
 }
 
 int computeLayers(const int width, const int height, const int minArea) {
@@ -221,32 +206,6 @@ int computeLayers(const int width, const int height, const int minArea) {
     }
 
     return layer;
-}
-
-cv::Rect2d boundingRect(const std::vector<cv::Point2d> &points) {
-    if (points.empty()) {
-        return {};
-    }
-
-    cv::Point2d min = points[ 0 ];
-    cv::Point2d max = points[ 0 ];
-    for (const auto &point : points) {
-        if (point.x < min.x) {
-            min.x = point.x;
-        }
-        if (point.y < min.y) {
-            min.y = point.y;
-        }
-
-        if (point.x > max.x) {
-            max.x = point.x;
-        }
-        if (point.y > max.y) {
-            max.y = point.y;
-        }
-    }
-
-    return {min, max};
 }
 
 #ifdef CV_SIMD
@@ -522,26 +481,6 @@ double normalizeAngle(const double angle) {
     return angle - k * 360.0;
 }
 
-void drawRegion(cv::Mat &img, const HRegion &region) {
-    auto *ptr = img.ptr<uchar>();
-    for (const auto &rle : region) {
-        auto *startPtr = ptr + rle.row * img.step + rle.startColumn;
-        for (int i = 0; i < rle.length; i++) {
-            *(startPtr + i) = 255;
-        }
-    }
-}
-
-void drawRegion(cv::Mat &img, const VRegion &region) {
-    auto *ptr = img.ptr<uchar>();
-    for (const auto &rle : region) {
-        auto *startPtr = ptr + rle.startRow * img.step + rle.col;
-        for (int i = 0; i < rle.length; i++) {
-            *(startPtr + i * img.step) = 255;
-        }
-    }
-}
-
 Model *trainModel(const cv::Mat &src, int level, double startAngle, double spanAngle,
                   double angleStep) {
     if (src.empty() || src.channels() != 1) {
@@ -580,7 +519,7 @@ Model *trainModel(const cv::Mat &src, int level, double startAngle, double spanA
     model.startAngle = startAngle;
     model.angleStep  = angleStep;
     model.stopAngle  = startAngle + angleStep * nAngle;
-    model.source     = src;
+    model.srcSize    = src.size();
     model.layers.resize(level);
 
     std::vector<cv::Mat> pyramids;
@@ -825,9 +764,8 @@ std::vector<Pose> matchModel(const cv::Mat &dst, const Model *model, int level, 
             return {};
         }
 
-        auto &templateImg = model->source;
-        if (dst.cols < templateImg.cols || dst.rows < templateImg.rows ||
-            dst.size().area() < templateImg.size().area()) {
+        if (dst.cols < model->srcSize.width || dst.rows < model->srcSize.height ||
+            dst.size().area() < model->srcSize.area()) {
             return {};
         }
 
@@ -877,9 +815,8 @@ std::vector<Pose> matchModel(const cv::Mat &dst, const Model *model, int level, 
     {
         std::vector<cv::RotatedRect> rects;
         rects.reserve(levelMatched.size());
-        const auto size = model->source.size();
         for (const auto &candidate : levelMatched) {
-            rects.emplace_back(cv::Point2f(candidate.pos), cv::Size2f(size),
+            rects.emplace_back(cv::Point2f(candidate.pos), cv::Size2f(model->srcSize),
                                static_cast<float>(candidate.angle));
         }
         filterOverlap(levelMatched, rects, maxOverlap);
@@ -895,6 +832,10 @@ std::vector<Pose> matchModel(const cv::Mat &dst, const Model *model, int level, 
             result.emplace_back(
                 Pose{static_cast<float>(candidate.pos.x), static_cast<float>(candidate.pos.y),
                      static_cast<float>(candidate.angle), static_cast<float>(candidate.score)});
+
+            if (result.size() >= maxCount) {
+                break;
+            }
         }
     }
 

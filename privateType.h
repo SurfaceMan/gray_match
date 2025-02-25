@@ -39,7 +39,7 @@ struct Model {
     double stopAngle  = 0;
     double angleStep  = 0;
 
-    cv::Mat            source;
+    cv::Size           srcSize;
     std::vector<Layer> layers;
 };
 
