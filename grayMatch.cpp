@@ -505,6 +505,26 @@ double normalizeAngle(const double angle) {
     return angle - k * 360.0;
 }
 
+void drawRegion(cv::Mat &img, const HRegion &region) {
+    auto *ptr = img.ptr<uchar>();
+    for (const auto &rle : region) {
+        auto *startPtr = ptr + rle.row * img.step + rle.startColumn;
+        for (int i = 0; i < rle.length; i++) {
+            *(startPtr + i) = 255;
+        }
+    }
+}
+
+void drawRegion(cv::Mat &img, const VRegion &region) {
+    auto *ptr = img.ptr<uchar>();
+    for (const auto &rle : region) {
+        auto *startPtr = ptr + rle.startRow * img.step + rle.col;
+        for (int i = 0; i < rle.length; i++) {
+            *(startPtr + i * img.step) = 255;
+        }
+    }
+}
+
 Model *trainModel(const cv::Mat &src, int level, double startAngle, double spanAngle,
                   double angleStep) {
     if (src.empty() || src.channels() != 1) {

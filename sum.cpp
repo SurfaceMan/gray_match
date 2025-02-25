@@ -60,9 +60,9 @@ inline void computeSumDiff(const cv::v_uint16x8 &start, const cv::v_uint16x8 &en
                            cv::v_int32x4 &diff0, cv::v_int32x4 &diff1) {
     cv::v_int16x8 sub;
     {
-        cv::v_int16x8 vStart = cv::v_reinterpret_as_s16(start);
-        cv::v_int16x8 vEnd   = cv::v_reinterpret_as_s16(end);
-        sub                  = cv::v_sub(vEnd, vStart);
+        auto vStart = cv::v_reinterpret_as_s16(start);
+        auto vEnd   = cv::v_reinterpret_as_s16(end);
+        sub         = cv::v_sub(vEnd, vStart);
     }
 
     cv::v_int32x4 val = cv::v_expand_low(sub);
@@ -138,7 +138,7 @@ void shiftH(const cv::Mat &src, const HRegion &hRegion, int row, cv::Mat &sum, c
         cv::v_int32x4 diff13 = cv::v_setzero_s32();
 
         for (const auto &rle : hRegion) {
-            auto *startPtr = srcPtr + (row + rle.row) * src.step + rle.startColumn + i;
+            auto *startPtr = srcPtr + (row + rle.row) * src.step + rle.startColumn + i - 1;
             auto *endPtr   = startPtr + rle.length;
 
             auto vStart = cv::v_load(startPtr);
@@ -172,13 +172,13 @@ void shiftH(const cv::Mat &src, const HRegion &hRegion, int row, cv::Mat &sum, c
         int32_t partSum   = 0;
         int32_t partSqSum = 0;
         for (const auto &rle : hRegion) {
-            auto *startPtr = srcPtr + (row + rle.row) * src.step + rle.startColumn + i;
+            auto *startPtr = srcPtr + (row + rle.row) * src.step + rle.startColumn + i - 1;
             auto *endPtr   = startPtr + rle.length;
 
-            auto start  = *startPtr;
-            auto end    = *endPtr;
-            partSum    += end - start;
-            partSqSum  += end * end - start * start;
+            int32_t start  = *startPtr;
+            int32_t end    = *endPtr;
+            partSum       += end - start;
+            partSqSum     += end * end - start * start;
         }
 
         auto *sumPtrStart   = sumPtr + i;
@@ -196,7 +196,7 @@ void shiftV(const cv::Mat &src, const VRegion &vRegion, int row, cv::Mat &sum, c
     int32_t partSum   = 0;
     int32_t partSqSum = 0;
     for (const auto &rle : vRegion) {
-        auto *startPtr = srcPtr + (row + rle.startRow) * src.step + rle.col;
+        auto *startPtr = srcPtr + (row + rle.startRow - 1) * src.step + rle.col;
         auto *endPtr   = startPtr + rle.length * src.step;
 
         int32_t start = *startPtr;
