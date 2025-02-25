@@ -581,6 +581,7 @@ Model *trainModel(const cv::Mat &src, int level, double startAngle, double spanA
     model.angleStep  = angleStep;
     model.stopAngle  = startAngle + angleStep * nAngle;
     model.source     = src;
+    model.layers.resize(level);
 
     std::vector<cv::Mat> pyramids;
     cv::buildPyramid(src, pyramids, level - 1);
@@ -592,6 +593,9 @@ Model *trainModel(const cv::Mat &src, int level, double startAngle, double spanA
 
         auto count  = static_cast<int>(ceil(spanAngle / layer.angleStep)) + 1;
         auto center = sizeCenter(pyramid.size());
+        layer.templates.resize(count);
+
+#pragma omp parallel for
         for (int j = 0; j < count; j++) {
             Template layerTemplate;
 
@@ -633,14 +637,17 @@ Model *trainModel(const cv::Mat &src, int level, double startAngle, double spanA
             layerTemplate.normal  = stdDevVal / sqrt(layerTemplate.invArea);
             layerTemplate.mean    = mean[ 0 ];
 
-            layer.templates.emplace_back(std::move(layerTemplate));
+            layer.templates[ j ] = std::move(layerTemplate);
         }
 
-        model.layers.emplace_back(std::move(layer));
+        model.layers[ i ] = std::move(layer);
     }
 
     return result;
 }
+
+#pragma omp declare reduction(combine : std::vector<Candidate> : omp_out.insert(                   \
+        omp_out.end(), omp_in.begin(), omp_in.end()))
 
 std::vector<Candidate> matchTopLevel(const cv::Mat &dstTop, const Layer &layer,
                                      const double modelAngleStart, double startAngle,
@@ -655,6 +662,8 @@ std::vector<Candidate> matchTopLevel(const cv::Mat &dstTop, const Layer &layer,
     const auto topScoreThreshold = minScore * pow(0.9, level);
     const bool calMaxByBlock =
         (dstTop.size().area() / layer.templates.front().img.size().area() > 500) && maxCount > 10;
+
+#pragma omp parallel for reduction(combine : candidates)
     for (int i = 0; i < count; i++) {
         const auto &layerTemplate = layer.templates[ startIndex + i ];
 
@@ -717,8 +726,9 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
                                       int level) {
     std::vector<Candidate> levelMatched;
 
-    for (const auto &candidate : candidates) {
-        auto pose    = candidate;
+#pragma omp parallel for reduction(combine : levelMatched)
+    for (std::size_t idx = 0; idx < candidates.size(); idx++) {
+        auto pose    = candidates[ idx ];
         bool matched = true;
         for (int currentLevel = level - 1; currentLevel >= 0; currentLevel--) {
             const auto &layer = model->layers[ currentLevel ];
