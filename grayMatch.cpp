@@ -244,7 +244,7 @@ uint64_t v_dot(const uchar *src, std::size_t srcStep, const uchar *temp, std::si
 void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const HRegion &hRegion,
                        const VRegion &vRegion, cv::Mat &result, const double mean,
                        const double normal, const double invArea) {
-    result = cv::Mat::zeros(src.size() - templateImg.size() + cv::Size(1, 1), CV_32FC1);
+    result.create(src.size() - templateImg.size() + cv::Size(1, 1), CV_32FC1);
 
     cv::Mat sumImg;
     cv::Mat sqSumImg;
