@@ -219,15 +219,32 @@ uint64_t v_dot(const uchar *src, std::size_t srcStep, const uchar *temp, std::si
         auto *tempPtr = temp + rle.row * tempStep + rle.startColumn;
 
         int i = 0;
+        for (int n = 0; n < rle.length / (4 * blockSize); n++) {
+            auto vSrc   = cv::v_load(srcPtr + i);
+            auto vTemp  = cv::v_load(tempPtr + i);
+            partVDot    = cv::v_add(partVDot, cv::v_dotprod_expand_fast(vSrc, vTemp));
+            i          += blockSize;
+
+            vSrc      = cv::v_load(srcPtr + i);
+            vTemp     = cv::v_load(tempPtr + i);
+            partVDot  = cv::v_add(partVDot, cv::v_dotprod_expand_fast(vSrc, vTemp));
+            i        += blockSize;
+
+            vSrc      = cv::v_load(srcPtr + i);
+            vTemp     = cv::v_load(tempPtr + i);
+            partVDot  = cv::v_add(partVDot, cv::v_dotprod_expand_fast(vSrc, vTemp));
+            i        += blockSize;
+
+            vSrc      = cv::v_load(srcPtr + i);
+            vTemp     = cv::v_load(tempPtr + i);
+            partVDot  = cv::v_add(partVDot, cv::v_dotprod_expand_fast(vSrc, vTemp));
+            i        += blockSize;
+        }
+
         for (; i < rle.length; i += blockSize) {
             auto vSrc  = cv::v_load(srcPtr + i);
             auto vTemp = cv::v_load(tempPtr + i);
-
-#ifdef __aarch64__
-            partVDot = cv::v_add(partVDot, cv::v_dotprod_expand_fast(vSrc, vTemp));
-#else
-            partVDot = cv::v_add(partVDot, cv::v_dotprod_expand(vSrc, vTemp));
-#endif
+            partVDot   = cv::v_add(partVDot, cv::v_dotprod_expand_fast(vSrc, vTemp));
         }
     }
 
