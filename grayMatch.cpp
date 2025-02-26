@@ -209,76 +209,87 @@ int computeLayers(const int width, const int height, const int minArea) {
 }
 
 #ifdef CV_SIMD
-
-uint64_t v_dot(const uchar *src, std::size_t srcStep, const uchar *temp, std::size_t tempStep,
-               int x, int y, const HRegion &region) {
-    constexpr auto blockSize = simdSize(cv::v_uint8);
-    auto           partVDot  = cv::v_setzero_u32();
-    for (const auto &rle : region) {
-        auto *srcPtr  = src + (y + rle.row) * srcStep + x + rle.startColumn;
-        auto *tempPtr = temp + rle.row * tempStep + rle.startColumn;
-
-        int i = 0;
-        for (int n = 0; n < rle.length / (4 * blockSize); n++) {
-            auto vSrc   = cv::v_load(srcPtr + i);
-            auto vTemp  = cv::v_load(tempPtr + i);
-            partVDot    = cv::v_add(partVDot, cv::v_dotprod_expand_fast(vSrc, vTemp));
-            i          += blockSize;
-
-            vSrc      = cv::v_load(srcPtr + i);
-            vTemp     = cv::v_load(tempPtr + i);
-            partVDot  = cv::v_add(partVDot, cv::v_dotprod_expand_fast(vSrc, vTemp));
-            i        += blockSize;
-
-            vSrc      = cv::v_load(srcPtr + i);
-            vTemp     = cv::v_load(tempPtr + i);
-            partVDot  = cv::v_add(partVDot, cv::v_dotprod_expand_fast(vSrc, vTemp));
-            i        += blockSize;
-
-            vSrc      = cv::v_load(srcPtr + i);
-            vTemp     = cv::v_load(tempPtr + i);
-            partVDot  = cv::v_add(partVDot, cv::v_dotprod_expand_fast(vSrc, vTemp));
-            i        += blockSize;
-        }
-
-        for (; i < rle.length; i += blockSize) {
-            auto vSrc  = cv::v_load(srcPtr + i);
-            auto vTemp = cv::v_load(tempPtr + i);
-            partVDot   = cv::v_add(partVDot, cv::v_dotprod_expand_fast(vSrc, vTemp));
-        }
-    }
-
-    auto sum = cv::v_add(cv::v_expand_low(partVDot), cv::v_expand_high(partVDot));
-    return cv::v_reduce_sum(sum);
-}
-
 void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const HRegion &hRegion,
-                       const VRegion &vRegion, cv::Mat &result, const double mean,
-                       const double normal, const double invArea) {
+                       cv::Mat &result) {
     result.create(src.size() - templateImg.size() + cv::Size(1, 1), CV_32FC1);
 
+    auto       *resultStart = (float *)result.data;
+    const auto  resultStep  = result.step1();
+    const auto *srcStart    = src.data;
+    const auto  srcStep     = src.step;
+    const auto *temStart    = templateImg.data;
+    const auto  temStep     = templateImg.step;
+
+    std::vector<cv::v_uint32> tmp(result.cols, cv::v_setzero_u32());
+    for (int y = 0; y < result.rows; y++) {
+        auto *resultPtr = resultStart + resultStep * y;
+
+        for (const auto &rle : hRegion) {
+            auto *temPtr  = temStart + temStep * rle.row + rle.startColumn;
+            auto *srcPtr0 = srcStart + srcStep * (y + rle.row) + rle.startColumn;
+
+            for (int i = 0; i < rle.length; i += simdSize(cv::v_uint8)) {
+                auto  vTem   = cv::v_load_aligned(temPtr + i);
+                auto *srcPtr = srcPtr0 + i;
+
+                int x = 0;
+                for (int n = 0; n < result.cols / 4; n++) {
+                    auto vSrc = cv::v_load(srcPtr + x);
+                    tmp[ x ]  = cv::v_add(tmp[ x ], cv::v_dotprod_expand_fast(vSrc, vTem));
+                    x++;
+
+                    vSrc     = cv::v_load(srcPtr + x);
+                    tmp[ x ] = cv::v_add(tmp[ x ], cv::v_dotprod_expand_fast(vSrc, vTem));
+                    x++;
+
+                    vSrc     = cv::v_load(srcPtr + x);
+                    tmp[ x ] = cv::v_add(tmp[ x ], cv::v_dotprod_expand_fast(vSrc, vTem));
+                    x++;
+
+                    vSrc     = cv::v_load(srcPtr + x);
+                    tmp[ x ] = cv::v_add(tmp[ x ], cv::v_dotprod_expand_fast(vSrc, vTem));
+                    x++;
+                }
+
+                for (; x < result.cols; x++) {
+                    auto vSrc = cv::v_load(srcPtr + x);
+                    tmp[ x ]  = cv::v_add(tmp[ x ], cv::v_dotprod_expand_fast(vSrc, vTem));
+                }
+            }
+        }
+
+        for (int x = 0; x < result.cols; x++) {
+            auto sum       = cv::v_reduce_sum(tmp[ x ]);
+            tmp[ x ]       = cv::v_setzero_u32();
+            resultPtr[ x ] = static_cast<float>(sum);
+        }
+    }
+}
+
+void ccoeffDenominator(const cv::Mat &src, const cv::Size &tempSize, const HRegion &hRegion,
+                       const VRegion &vRegion, cv::Mat &result, const double mean,
+                       const double normal, const double invArea) {
     cv::Mat sumImg;
     cv::Mat sqSumImg;
-    integralSum(src, sumImg, sqSumImg, templateImg.size(), hRegion, vRegion);
+    integralSum(src, sumImg, sqSumImg, tempSize, hRegion, vRegion);
 
-    auto *srcStartPtr      = src.data;
-    auto *tempStartPtr     = templateImg.data;
-    auto *resultStartPtr   = (float *)result.data;
-    auto *sumImgStartPtr   = (double *)sumImg.data;
-    auto *sqSumImgStartPtr = (double *)sqSumImg.data;
+    auto      *resultStart   = (float *)result.data;
+    const auto resultStep    = result.step1();
+    auto      *sumStartPtr   = (double *)sumImg.data;
+    const auto sumStep       = sumImg.step1();
+    auto      *sqSumStartPtr = (double *)sqSumImg.data;
+    const auto sqSumStep     = sqSumImg.step1();
 
     for (int y = 0; y < result.rows; y++) {
-        auto *resultPtr = resultStartPtr + y * result.step1();
-        auto *sumPtr    = sumImgStartPtr + y * sumImg.step1();
-        auto *sqSumPtr  = sqSumImgStartPtr + y * sqSumImg.step1();
+        auto *resultPtr = resultStart + resultStep * y;
+        auto *sumPtr    = sumStartPtr + sumStep * y;
+        auto *sqSumPtr  = sqSumStartPtr + sqSumStep * y;
         for (int x = 0; x < result.cols; x++) {
-            auto      &score = resultPtr[ x ];
-            const auto sum   = sumPtr[ x ];
-            const auto sqSum = sqSumPtr[ x ];
-            uint64_t   dot =
-                v_dot(srcStartPtr, src.step, tempStartPtr, templateImg.step, x, y, hRegion);
+            auto &score = resultPtr[ x ];
+            auto  sum   = sumPtr[ x ];
+            auto  sqSum = sqSumPtr[ x ];
 
-            const auto numerator    = static_cast<double>(dot) - sum * mean;
+            const auto numerator    = static_cast<double>(score) - sum * mean;
             const auto partSqNormal = sqSum - static_cast<double>(sum * sum) * invArea;
             const auto diff         = std::max(partSqNormal, 0.);
             const auto denominator =
@@ -298,8 +309,9 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const HRe
 
 void matchTemplate(const cv::Mat &src, cv::Mat &result, const Template &layerTemplate) {
 #ifdef CV_SIMD
-    matchTemplateSimd(src, layerTemplate.img, layerTemplate.hRegion, layerTemplate.vRegion, result,
-                      layerTemplate.mean, layerTemplate.normal, layerTemplate.invArea);
+    matchTemplateSimd(src, layerTemplate.img, layerTemplate.hRegion, result);
+    ccoeffDenominator(src, layerTemplate.img.size(), layerTemplate.hRegion, layerTemplate.vRegion,
+                      result, layerTemplate.mean, layerTemplate.normal, layerTemplate.invArea);
 
 #else
     // make mask at train model process
