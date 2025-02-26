@@ -117,16 +117,17 @@ inline void v_expand_store(double *ptr, const std::array<int, 4> &val) {
     ptr[ 3 ] = ptr[ 2 ] + val[ 3 ];
 }
 
-void shiftH(const cv::Mat &src, const HRegion &hRegion, int row, cv::Mat &sum, cv::Mat &sqSum) {
+void shiftH(const uchar *src, int srcStep, const HRegion &hRegion, int row, double *sum,
+            int sumStep, int sumWidth, double *sqSum, int sqSumStep) {
     constexpr auto blockSize = simdSize(cv::v_uint8);
-    auto          *srcPtr    = src.ptr<uchar>();
-    auto          *sumPtr    = sum.ptr<double>(row);
-    auto          *sqSumPtr  = sqSum.ptr<double>(row);
+    auto          *srcPtr    = src;
+    auto          *sumPtr    = sum + row * sumStep;
+    auto          *sqSumPtr  = sqSum + row * sqSumStep;
 
     std::array<int, 4> buf;
 
     int i = 1;
-    for (; i < sum.cols - blockSize; i += blockSize) {
+    for (; i < sumWidth - blockSize; i += blockSize) {
         cv::v_int32x4 diff0 = cv::v_setzero_s32();
         cv::v_int32x4 diff1 = cv::v_setzero_s32();
         cv::v_int32x4 diff2 = cv::v_setzero_s32();
@@ -138,7 +139,7 @@ void shiftH(const cv::Mat &src, const HRegion &hRegion, int row, cv::Mat &sum, c
         cv::v_int32x4 diff13 = cv::v_setzero_s32();
 
         for (const auto &rle : hRegion) {
-            auto *startPtr = srcPtr + (row + rle.row) * src.step + rle.startColumn + i - 1;
+            auto *startPtr = srcPtr + (row + rle.row) * srcStep + rle.startColumn + i - 1;
             auto *endPtr   = startPtr + rle.length;
 
             auto vStart = cv::v_load(startPtr);
@@ -168,11 +169,11 @@ void shiftH(const cv::Mat &src, const HRegion &hRegion, int row, cv::Mat &sum, c
         v_expand_store(sqSumPtrStart + 12, buf);
     }
 
-    for (; i < sum.cols; i++) {
+    for (; i < sumWidth; i++) {
         int32_t partSum   = 0;
         int32_t partSqSum = 0;
         for (const auto &rle : hRegion) {
-            auto *startPtr = srcPtr + (row + rle.row) * src.step + rle.startColumn + i - 1;
+            auto *startPtr = srcPtr + (row + rle.row) * srcStep + rle.startColumn + i - 1;
             auto *endPtr   = startPtr + rle.length;
 
             int32_t start  = *startPtr;
@@ -188,16 +189,17 @@ void shiftH(const cv::Mat &src, const HRegion &hRegion, int row, cv::Mat &sum, c
     }
 }
 
-void shiftV(const cv::Mat &src, const VRegion &vRegion, int row, cv::Mat &sum, cv::Mat &sqSum) {
-    auto *srcPtr   = src.ptr<uchar>();
-    auto *sumPtr   = sum.ptr<double>(row);
-    auto *sqSumPtr = sqSum.ptr<double>(row);
+void shiftV(const uchar *src, int srcStep, const VRegion &vRegion, int row, double *sum,
+            int sumStep, double *sqSum, int sqSumStep) {
+    auto *srcPtr   = src;
+    auto *sumPtr   = sum + row * sumStep;
+    auto *sqSumPtr = sqSum + row * sqSumStep;
 
     int32_t partSum   = 0;
     int32_t partSqSum = 0;
     for (const auto &rle : vRegion) {
-        auto *startPtr = srcPtr + (row + rle.startRow - 1) * src.step + rle.col;
-        auto *endPtr   = startPtr + rle.length * src.step;
+        auto *startPtr = srcPtr + (row + rle.startRow - 1) * srcStep + rle.col;
+        auto *endPtr   = startPtr + rle.length * srcStep;
 
         int32_t start = *startPtr;
         int32_t end   = *endPtr;
@@ -206,8 +208,8 @@ void shiftV(const cv::Mat &src, const VRegion &vRegion, int row, cv::Mat &sum, c
         partSqSum += end * end - start * start;
     }
 
-    sumPtr[ 0 ]   = *(sumPtr - sum.step1()) + partSum;
-    sqSumPtr[ 0 ] = *(sqSumPtr - sqSum.step1()) + partSqSum;
+    sumPtr[ 0 ]   = *(sumPtr - sumStep) + partSum;
+    sqSumPtr[ 0 ] = *(sqSumPtr - sqSumStep) + partSqSum;
 }
 
 void integralSum(const cv::Mat &src, cv::Mat &sum, cv::Mat &sqSum, const cv::Size &templateSize,
@@ -216,8 +218,9 @@ void integralSum(const cv::Mat &src, cv::Mat &sum, cv::Mat &sqSum, const cv::Siz
     sum.create(size, CV_64FC1);
     sqSum.create(size, CV_64FC1);
 
-    auto sumPtr   = sum.ptr<double>();
-    auto sqSumPtr = sqSum.ptr<double>();
+    auto *srcPtr   = src.ptr<uchar>();
+    auto *sumPtr   = sum.ptr<double>();
+    auto *sqSumPtr = sqSum.ptr<double>();
 
     // compute first
     uint64 sum0;
@@ -227,9 +230,10 @@ void integralSum(const cv::Mat &src, cv::Mat &sum, cv::Mat &sqSum, const cv::Siz
     sqSumPtr[ 0 ] = static_cast<double>(sqSum0);
 
     for (int y = 0; y < size.height; y++) {
-        shiftH(src, hRegion, y, sum, sqSum);
+        shiftH(srcPtr, src.step, hRegion, y, sumPtr, sum.step1(), sum.cols, sqSumPtr,
+               sqSum.step1());
         if (y + 1 < size.height) {
-            shiftV(src, vRegion, y + 1, sum, sqSum);
+            shiftV(srcPtr, src.step, vRegion, y + 1, sumPtr, sum.step1(), sqSumPtr, sqSum.step1());
         }
     }
 }
