@@ -275,18 +275,14 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const HRe
             auto      &score = resultPtr[ x ];
             const auto sum   = sumPtr[ x ];
             const auto sqSum = sqSumPtr[ x ];
-
-            uint64_t dot =
+            uint64_t   dot =
                 v_dot(srcStartPtr, src.step, tempStartPtr, templateImg.step, x, y, hRegion);
 
-            const auto numerator = static_cast<double>(dot) - static_cast<double>(sum) * mean;
-
-            const auto fsqSum       = static_cast<double>(sqSum);
-            const auto partSqNormal = fsqSum - static_cast<double>(sum * sum) * invArea;
-
-            const auto diff = std::max(partSqNormal, 0.);
+            const auto numerator    = static_cast<double>(dot) - sum * mean;
+            const auto partSqNormal = sqSum - static_cast<double>(sum * sum) * invArea;
+            const auto diff         = std::max(partSqNormal, 0.);
             const auto denominator =
-                (diff <= std::min(0.5, 10 * FLT_EPSILON * fsqSum)) ? 0 : sqrt(diff) * normal;
+                (diff <= std::min(0.5, 10 * FLT_EPSILON * sqSum)) ? 0 : sqrt(diff) * normal;
 
             if (abs(numerator) < denominator) {
                 score = static_cast<float>(numerator / denominator);
