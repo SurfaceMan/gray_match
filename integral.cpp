@@ -122,11 +122,11 @@ void integralSimd(const cv::Mat &src, cv::Mat &sum, cv::Mat &sqSum) {
     memset(sum.data, 0, sum.step[ 0 ]);
     memset(sqSum.data, 0, sqSum.step[ 0 ]);
 
-    const auto *srcStart   = src.ptr<uchar>();
+    const auto *srcStart   = src.data;
     const auto  srcStep    = src.step[ 0 ];
-    auto       *sumStart   = sum.ptr<double>(1) + 1;
+    auto       *sumStart   = (double *)sum.data + sum.step1() + 1;
     const auto  sumStep    = sum.step[ 0 ] / sum.step[ 1 ];
-    auto       *sqSumStart = sqSum.ptr<double>(1) + 1;
+    auto       *sqSumStart = (double *)sqSum.data + sqSum.step1() + 1;
     const auto  sqSumStep  = sqSum.step[ 0 ] / sqSum.step[ 1 ];
     const auto  end        = size.width - simdSize(cv::v_uint8);
     for (int y = 0; y < src.rows; y++) {

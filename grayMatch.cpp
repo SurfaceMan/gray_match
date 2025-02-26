@@ -214,7 +214,7 @@ cv::Size computeRotationSize(const cv::Size &dstSize, const cv::Size &templateSi
 #include "integral.h"
 
 void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &result) {
-    result = cv::Mat(src.size() - templateImg.size() + cv::Size(1, 1), CV_32FC1);
+    result.create(src.size() - templateImg.size() + cv::Size(1, 1), CV_32FC1);
 
     auto       *resultStart = result.ptr<float>();
     const auto  resultStep  = result.step[ 0 ] / result.step[ 1 ];
@@ -270,20 +270,21 @@ void ccoeffDenominator(const cv::Mat &src, const cv::Size &templateSize, cv::Mat
     cv::integral(src, sum, sqSum, CV_64F);
 #endif
 
-    const auto *q0 = sqSum.ptr<double>(0);
+    const auto *q0 = (double *)sqSum.data;
     const auto *q1 = q0 + templateSize.width;
-    const auto *q2 = sqSum.ptr<double>(templateSize.height);
+    const auto *q2 = (double *)sqSum.data + sqSum.step1() * templateSize.height;
     const auto *q3 = q2 + templateSize.width;
 
-    const auto *p0 = sum.ptr<double>(0);
+    const auto *p0 = (double *)sum.data;
     const auto *p1 = p0 + templateSize.width;
-    const auto *p2 = sum.ptr<double>(templateSize.height);
+    const auto *p2 = (double *)sum.data + sum.step1() * templateSize.height;
     const auto *p3 = p2 + templateSize.width;
 
-    const auto step = sum.step / sizeof(double);
+    const auto step           = sum.step / sizeof(double);
+    auto      *resultStartPtr = (float *)result.data;
 
     for (int y = 0; y < result.rows; y++) {
-        auto *scorePtr = result.ptr<float>(y);
+        auto *scorePtr = resultStartPtr + y * result.step1();
         auto  idx      = y * step;
         for (int x = 0; x < result.cols; x++, idx++) {
             auto      &score     = scorePtr[ x ];
