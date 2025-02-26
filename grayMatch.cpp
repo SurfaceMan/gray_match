@@ -833,7 +833,7 @@ std::vector<Pose> matchModel(const cv::Mat &dst, const Model *model, int level, 
                 Pose{static_cast<float>(candidate.pos.x), static_cast<float>(candidate.pos.y),
                      static_cast<float>(candidate.angle), static_cast<float>(candidate.score)});
 
-            if (result.size() >= maxCount) {
+            if (result.size() >= static_cast<std::size_t>(maxCount)) {
                 break;
             }
         }
