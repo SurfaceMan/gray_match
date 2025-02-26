@@ -213,15 +213,13 @@ int computeLayers(const int width, const int height, const int minArea) {
 uint64_t v_dot(const uchar *src, std::size_t srcStep, const uchar *temp, std::size_t tempStep,
                int x, int y, const HRegion &region) {
     constexpr auto blockSize = simdSize(cv::v_uint8);
-
-    uint32_t partDot  = 0;
-    auto     partVDot = cv::v_setzero_u32();
+    auto           partVDot  = cv::v_setzero_u32();
     for (const auto &rle : region) {
         auto *srcPtr  = src + (y + rle.row) * srcStep + x + rle.startColumn;
         auto *tempPtr = temp + rle.row * tempStep + rle.startColumn;
 
         int i = 0;
-        for (; i < rle.length - blockSize; i += blockSize) {
+        for (; i < rle.length; i += blockSize) {
             auto vSrc  = cv::v_load(srcPtr + i);
             auto vTemp = cv::v_load(tempPtr + i);
 
@@ -231,14 +229,10 @@ uint64_t v_dot(const uchar *src, std::size_t srcStep, const uchar *temp, std::si
             partVDot = cv::v_add(partVDot, cv::v_dotprod_expand(vSrc, vTemp));
 #endif
         }
-
-        for (; i < rle.length; i++) {
-            partDot += *(srcPtr + i) * *(tempPtr + i);
-        }
     }
 
     auto sum = cv::v_add(cv::v_expand_low(partVDot), cv::v_expand_high(partVDot));
-    return cv::v_reduce_sum(sum) + partDot;
+    return cv::v_reduce_sum(sum);
 }
 
 void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const HRegion &hRegion,
@@ -250,11 +244,11 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const HRe
     cv::Mat sqSumImg;
     integralSum(src, sumImg, sqSumImg, templateImg.size(), hRegion, vRegion);
 
-    auto *srcStartPtr      = src.ptr<uchar>();
-    auto *tempStartPtr     = templateImg.ptr<uchar>();
-    auto *resultStartPtr   = result.ptr<float>();
-    auto *sumImgStartPtr   = sumImg.ptr<double>();
-    auto *sqSumImgStartPtr = sqSumImg.ptr<double>();
+    auto *srcStartPtr      = src.data;
+    auto *tempStartPtr     = templateImg.data;
+    auto *resultStartPtr   = (float *)result.data;
+    auto *sumImgStartPtr   = (double *)sumImg.data;
+    auto *sqSumImgStartPtr = (double *)sqSumImg.data;
 
     for (int y = 0; y < result.rows; y++) {
         auto *resultPtr = resultStartPtr + y * result.step1();
@@ -549,6 +543,8 @@ Model *trainModel(const cv::Mat &src, int level, double startAngle, double spanA
             rotate.at<double>(1, 2) += offset.y;
 
             auto &rotated = layerTemplate.img;
+            auto img = cv::Mat::zeros(rect.height, rect.width + simdSize(cv::v_uint8) - 1, CV_8UC1);
+            rotated  = img(cv::Rect(0, 0, rect.width, rect.height));
             cv::warpAffine(pyramid, rotated, rotate, rect.size(), cv::INTER_CUBIC,
                            cv::BORDER_DEFAULT);
 

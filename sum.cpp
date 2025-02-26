@@ -30,7 +30,7 @@ inline void computeSum(const cv::v_uint8x16 &src, cv::v_uint32x4 &sum, cv::v_uin
 
 void computeSum(const cv::Mat &src, const HRegion &hRegion, uint64 &sum, uint64 &sqSum) {
     constexpr auto blockSize = simdSize(cv::v_uint8);
-    auto          *srcPtr    = src.ptr<uchar>();
+    auto          *srcPtr    = src.data;
     cv::v_uint32x4 vSum      = cv::v_setzero_u32();
     cv::v_uint64x2 vSqSum    = cv::v_setzero_u64();
     uint32_t       partSum   = 0;
@@ -117,8 +117,8 @@ inline void v_expand_store(double *ptr, const std::array<int, 4> &val) {
     ptr[ 3 ] = ptr[ 2 ] + val[ 3 ];
 }
 
-void shiftH(const uchar *src, int srcStep, const HRegion &hRegion, int row, double *sum,
-            int sumStep, int sumWidth, double *sqSum, int sqSumStep) {
+void shiftH(const uchar *src, std::size_t srcStep, const HRegion &hRegion, int row, double *sum,
+            std::size_t sumStep, int sumWidth, double *sqSum, std::size_t sqSumStep) {
     constexpr auto blockSize = simdSize(cv::v_uint8);
     auto          *srcPtr    = src;
     auto          *sumPtr    = sum + row * sumStep;
@@ -189,8 +189,8 @@ void shiftH(const uchar *src, int srcStep, const HRegion &hRegion, int row, doub
     }
 }
 
-void shiftV(const uchar *src, int srcStep, const VRegion &vRegion, int row, double *sum,
-            int sumStep, double *sqSum, int sqSumStep) {
+void shiftV(const uchar *src, std::size_t srcStep, const VRegion &vRegion, int row, double *sum,
+            std::size_t sumStep, double *sqSum, std::size_t sqSumStep) {
     auto *srcPtr   = src;
     auto *sumPtr   = sum + row * sumStep;
     auto *sqSumPtr = sqSum + row * sqSumStep;
@@ -218,9 +218,9 @@ void integralSum(const cv::Mat &src, cv::Mat &sum, cv::Mat &sqSum, const cv::Siz
     sum.create(size, CV_64FC1);
     sqSum.create(size, CV_64FC1);
 
-    auto *srcPtr   = src.ptr<uchar>();
-    auto *sumPtr   = sum.ptr<double>();
-    auto *sqSumPtr = sqSum.ptr<double>();
+    auto *srcPtr   = src.data;
+    auto *sumPtr   = (double *)sum.data;
+    auto *sqSumPtr = (double *)sqSum.data;
 
     // compute first
     uint64 sum0;
