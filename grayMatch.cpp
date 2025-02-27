@@ -216,9 +216,9 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const HRe
     auto       *resultStart = (float *)result.data;
     const auto  resultStep  = result.step1();
     const auto *srcStart    = src.data;
-    const auto  srcStep     = src.step;
+    const auto  srcStep     = src.step1();
     const auto *temStart    = templateImg.data;
-    const auto  temStep     = templateImg.step;
+    const auto  temStep     = templateImg.step1();
 
     std::vector<cv::v_uint32> tmp(result.cols, cv::v_setzero_u32());
     for (int y = 0; y < result.rows; y++) {
@@ -229,7 +229,7 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const HRe
             auto *srcPtr0 = srcStart + srcStep * (y + rle.row) + rle.startColumn;
 
             for (int i = 0; i < rle.length; i += simdSize(cv::v_uint8)) {
-                auto  vTem   = cv::v_load_aligned(temPtr + i);
+                auto  vTem   = cv::v_load(temPtr + i);
                 auto *srcPtr = srcPtr0 + i;
 
                 int x = 0;
