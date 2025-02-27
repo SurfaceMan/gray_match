@@ -35,5 +35,6 @@ target_compile_options(${PROJECT_NAME} PRIVATE
 target_compile_definitions(${PROJECT_NAME} PRIVATE
         $<$<STREQUAL:${CMAKE_SYSTEM_PROCESSOR},loongarch64>:CV_LSX>
 )
+target_compile_definitions(${PROJECT_NAME} PRIVATE IMG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/img")
 
 message("Arch:${CMAKE_SYSTEM_PROCESSOR}")
