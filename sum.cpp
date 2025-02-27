@@ -218,9 +218,11 @@ void integralSum(const cv::Mat &src, cv::Mat &sum, cv::Mat &sqSum, const cv::Siz
     sum.create(size, CV_64FC1);
     sqSum.create(size, CV_64FC1);
 
-    auto *srcPtr   = src.data;
-    auto *sumPtr   = (double *)sum.data;
-    auto *sqSumPtr = (double *)sqSum.data;
+    auto *srcPtr    = src.data;
+    auto *sumPtr    = (double *)sum.data;
+    auto *sqSumPtr  = (double *)sqSum.data;
+    auto  sumStep   = sum.step1();
+    auto  sqSumStep = sqSum.step1();
 
     // compute first
     uint64 sum0;
@@ -230,10 +232,9 @@ void integralSum(const cv::Mat &src, cv::Mat &sum, cv::Mat &sqSum, const cv::Siz
     sqSumPtr[ 0 ] = static_cast<double>(sqSum0);
 
     for (int y = 0; y < size.height; y++) {
-        shiftH(srcPtr, src.step, hRegion, y, sumPtr, sum.step1(), sum.cols, sqSumPtr,
-               sqSum.step1());
+        shiftH(srcPtr, src.step, hRegion, y, sumPtr, sumStep, sum.cols, sqSumPtr, sqSumStep);
         if (y + 1 < size.height) {
-            shiftV(srcPtr, src.step, vRegion, y + 1, sumPtr, sum.step1(), sqSumPtr, sqSum.step1());
+            shiftV(srcPtr, src.step, vRegion, y + 1, sumPtr, sumStep, sqSumPtr, sqSumStep);
         }
     }
 }
