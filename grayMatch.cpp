@@ -9,105 +9,6 @@ constexpr double TOLERANCE = 0.0000001;
 constexpr int    CANDIDATE = 5;
 constexpr double INVALID   = -1.;
 
-struct BlockMax {
-    struct Block {
-        cv::Rect  rect;
-        cv::Point maxPos;
-        double    maxScore;
-
-        Block()
-            : maxScore(0) {}
-
-        Block(const cv::Rect &rect_, const cv::Point &maxPos_, const double maxScore_)
-            : rect(rect_)
-            , maxPos(maxPos_)
-            , maxScore(maxScore_) {}
-
-        Block(Block &&rhs) noexcept {
-            maxScore = rhs.maxScore;
-            maxPos   = rhs.maxPos;
-            maxScore = rhs.maxScore;
-        }
-
-        bool operator<(const Block &rhs) const {
-            return this->maxScore > rhs.maxScore;
-        }
-    };
-
-    std::vector<Block> blocks;
-    cv::Mat            score;
-
-    BlockMax(cv::Mat score_, cv::Size templateSize) {
-        score = std::move(score_);
-
-        // divide source image to blocks then compute max
-        auto blockWidth  = templateSize.width * 2;
-        auto blockHeight = templateSize.height * 2;
-
-        auto nWidth    = score.size().width / blockWidth;
-        auto nHeight   = score.size().height / blockHeight;
-        auto hRemained = score.size().width % blockWidth;
-        auto vRemained = score.size().height % blockHeight;
-
-        blocks.reserve(nWidth * nHeight);
-        for (int y = 0; y < nHeight; y++) {
-            for (int x = 0; x < nWidth; x++) {
-                cv::Rect rect(x * blockWidth, y * blockHeight, blockWidth, blockHeight);
-
-                Block block;
-                block.rect = rect;
-                cv::minMaxLoc(score(rect), nullptr, &block.maxScore, nullptr, &block.maxPos);
-                block.maxPos += rect.tl();
-                blocks.push_back(std::move(block));
-            }
-        }
-
-        if (hRemained) {
-            cv::Rect rightRect(nWidth * blockWidth, 0, hRemained, score.size().height);
-            Block    rightBlock;
-            rightBlock.rect = rightRect;
-            cv::minMaxLoc(score(rightRect), nullptr, &rightBlock.maxScore, nullptr,
-                          &rightBlock.maxPos);
-            rightBlock.maxPos += rightRect.tl();
-            blocks.push_back(std::move(rightBlock));
-        }
-
-        if (vRemained) {
-            auto width = hRemained ? nWidth * blockWidth : score.size().width;
-            if (width < 1) {
-                return;
-            }
-
-            cv::Rect bottomRect(0, nHeight * blockHeight, width, vRemained);
-            Block    bottomBlock;
-            bottomBlock.rect = bottomRect;
-            cv::minMaxLoc(score(bottomRect), nullptr, &bottomBlock.maxScore, nullptr,
-                          &bottomBlock.maxPos);
-            bottomBlock.maxPos += bottomRect.tl();
-            blocks.push_back(std::move(bottomBlock));
-        }
-    }
-
-    void update(const cv::Rect &rect) {
-        for (auto &block : blocks) {
-            auto intersection = block.rect & rect;
-            if (intersection.empty()) {
-                continue;
-            }
-
-            // update
-            cv::minMaxLoc(score(block.rect), nullptr, &block.maxScore, nullptr, &block.maxPos);
-            block.maxPos += block.rect.tl();
-        }
-    }
-
-    void maxValueLoc(double &maxScore, cv::Point &maxPos) {
-        const auto max = std::max_element(blocks.begin(), blocks.end());
-        maxScore       = max->maxScore;
-        maxPos         = max->maxPos;
-    }
-};
-
 struct Candidate {
     cv::Point2d pos;
     double      angle;
@@ -326,22 +227,6 @@ void matchTemplate(const cv::Mat &src, cv::Mat &result, const Template &layerTem
     cv::matchTemplate(src, layerTemplate.img, result, cv::TM_CCOEFF_NORMED, roi);
 
 #endif // CV_SIMD
-}
-
-void nextMaxLoc(const cv::Point &pos, const cv::Size templateSize, const double maxOverlap,
-                BlockMax &block, double &maxScore, cv::Point &maxPos) {
-    const auto      alone = 1. - maxOverlap;
-    const cv::Point offset(static_cast<int>(templateSize.width * alone),
-                           static_cast<int>(templateSize.height * alone));
-    const cv::Size  size(static_cast<int>(2 * templateSize.width * alone),
-                         static_cast<int>(2 * templateSize.height * alone));
-    const cv::Rect  rectIgnore(pos - offset, size);
-
-    // clear neighbor
-    cv::rectangle(block.score, rectIgnore, cv::Scalar(-1), cv::FILLED);
-
-    block.update(rectIgnore);
-    block.maxValueLoc(maxScore, maxPos);
 }
 
 void nextMaxLoc(cv::Mat &score, const cv::Point &pos, const cv::RotatedRect &rect,
@@ -615,14 +500,10 @@ std::vector<Candidate> matchTopLevel(const cv::Mat &dstTop, const Layer &layer,
                                      const double minScore, const int maxCount, const int level) {
     const int startIndex =
         static_cast<int>(floor((startAngle - modelAngleStart) / layer.angleStep));
-    const int count = static_cast<int>(ceil(spanAngle / layer.angleStep)) + 1;
+    const int  count             = static_cast<int>(ceil(spanAngle / layer.angleStep)) + 1;
+    const auto topScoreThreshold = minScore * pow(0.9, level);
 
     std::vector<Candidate> candidates;
-
-    const auto topScoreThreshold = minScore * pow(0.9, level);
-    const bool calMaxByBlock =
-        (dstTop.size().area() / layer.templates.front().img.size().area() > 500) && maxCount > 10;
-
 #pragma omp parallel for reduction(combine : candidates)
     for (int i = 0; i < count; i++) {
         const auto &layerTemplate = layer.templates[ startIndex + i ];
@@ -630,48 +511,24 @@ std::vector<Candidate> matchTopLevel(const cv::Mat &dstTop, const Layer &layer,
         cv::Mat result;
         matchTemplate(dstTop, result, layerTemplate);
 
-        if (calMaxByBlock) {
-            BlockMax  block(result, layerTemplate.img.size());
-            double    maxScore;
-            cv::Point maxPos;
-            block.maxValueLoc(maxScore, maxPos);
+        double    maxScore;
+        cv::Point maxPos;
+        cv::minMaxLoc(result, nullptr, &maxScore, nullptr, &maxPos);
+        if (maxScore < topScoreThreshold) {
+            continue;
+        }
+
+        candidates.emplace_back(cv::Point2d(maxPos) + cv::Point2d(layerTemplate.rect.center),
+                                layerTemplate.rect.angle, maxScore);
+        for (int j = 0; j < maxCount + CANDIDATE - 1; j++) {
+
+            nextMaxLoc(result, maxPos, layerTemplate.rect, maxOverlap, maxScore, maxPos);
             if (maxScore < topScoreThreshold) {
-                continue;
+                break;
             }
 
             candidates.emplace_back(cv::Point2d(maxPos) + cv::Point2d(layerTemplate.rect.center),
                                     layerTemplate.rect.angle, maxScore);
-            for (int j = 0; j < maxCount + CANDIDATE - 1; j++) {
-                nextMaxLoc(maxPos, layerTemplate.img.size(), maxOverlap, block, maxScore, maxPos);
-                if (maxScore < topScoreThreshold) {
-                    break;
-                }
-
-                candidates.emplace_back(cv::Point2d(maxPos) +
-                                            cv::Point2d(layerTemplate.rect.center),
-                                        layerTemplate.rect.angle, maxScore);
-            }
-        } else {
-            double    maxScore;
-            cv::Point maxPos;
-            cv::minMaxLoc(result, nullptr, &maxScore, nullptr, &maxPos);
-            if (maxScore < topScoreThreshold) {
-                continue;
-            }
-
-            candidates.emplace_back(cv::Point2d(maxPos) + cv::Point2d(layerTemplate.rect.center),
-                                    layerTemplate.rect.angle, maxScore);
-            for (int j = 0; j < maxCount + CANDIDATE - 1; j++) {
-
-                nextMaxLoc(result, maxPos, layerTemplate.rect, maxOverlap, maxScore, maxPos);
-                if (maxScore < topScoreThreshold) {
-                    break;
-                }
-
-                candidates.emplace_back(cv::Point2d(maxPos) +
-                                            cv::Point2d(layerTemplate.rect.center),
-                                        layerTemplate.rect.angle, maxScore);
-            }
         }
     }
     std::sort(candidates.begin(), candidates.end());
@@ -825,9 +682,8 @@ std::vector<Pose> matchModel(const cv::Mat &dst, const Model *model, int level, 
                       spanAngle, maxOverlap, minScore, maxCount, level);
 
     // match candidate each level
-    std::vector<Candidate> levelMatched =
+    auto levelMatched =
         matchDownLevel(pyramids, model->startAngle, candidates, minScore, subpixel, model, level);
-
     if (levelMatched.empty()) {
         return {};
     }
@@ -844,19 +700,17 @@ std::vector<Pose> matchModel(const cv::Mat &dst, const Model *model, int level, 
     }
 
     std::vector<Pose> result;
-    {
-        for (const auto &candidate : levelMatched) {
-            if (candidate.score < 0) {
-                continue;
-            }
+    for (const auto &candidate : levelMatched) {
+        if (candidate.score < 0) {
+            continue;
+        }
 
-            result.emplace_back(
-                Pose{static_cast<float>(candidate.pos.x), static_cast<float>(candidate.pos.y),
-                     static_cast<float>(candidate.angle), static_cast<float>(candidate.score)});
+        result.emplace_back(
+            Pose{static_cast<float>(candidate.pos.x), static_cast<float>(candidate.pos.y),
+                 static_cast<float>(candidate.angle), static_cast<float>(candidate.score)});
 
-            if (result.size() >= static_cast<std::size_t>(maxCount)) {
-                break;
-            }
+        if (result.size() >= static_cast<std::size_t>(maxCount)) {
+            break;
         }
     }
 
