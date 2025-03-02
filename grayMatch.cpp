@@ -543,7 +543,7 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
                                       int level) {
     std::vector<Candidate> levelMatched;
 
-#pragma omp parallel for reduction(combine : levelMatched)
+#pragma omp parallel for reduction(combine : levelMatched) schedule(dynamic)
     for (std::size_t idx = 0; idx < candidates.size(); idx++) {
         auto pose    = candidates[ idx ];
         bool matched = true;
