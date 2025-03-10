@@ -234,13 +234,27 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &
                 auto  vTem   = cv::v_load_aligned(temPtr + i);
                 auto *srcPtr = srcStart + srcStep * (y + templateRow) + i;
 
-                for (int x = 0; x < result.cols; x++) {
+                int x = 0;
+                for (int n = 0; n < result.cols / 4; n++) {
                     auto vSrc = cv::v_load(srcPtr + x);
-#ifdef __aarch64__
+                    tmp[ x ]  = cv::v_add(tmp[ x ], cv::v_dotprod_expand_fast(vSrc, vTem));
+                    x++;
+
+                    vSrc     = cv::v_load(srcPtr + x);
                     tmp[ x ] = cv::v_add(tmp[ x ], cv::v_dotprod_expand_fast(vSrc, vTem));
-#else
-                    tmp[ x ] = cv::v_add(tmp[ x ], cv::v_dotprod_expand(vSrc, vTem));
-#endif
+                    x++;
+
+                    vSrc     = cv::v_load(srcPtr + x);
+                    tmp[ x ] = cv::v_add(tmp[ x ], cv::v_dotprod_expand_fast(vSrc, vTem));
+                    x++;
+
+                    vSrc     = cv::v_load(srcPtr + x);
+                    tmp[ x ] = cv::v_add(tmp[ x ], cv::v_dotprod_expand_fast(vSrc, vTem));
+                    x++;
+                }
+                for (; x < result.cols; x++) {
+                    auto vSrc = cv::v_load(srcPtr + x);
+                    tmp[ x ]  = cv::v_add(tmp[ x ], cv::v_dotprod_expand_fast(vSrc, vTem));
                 }
             }
         }
