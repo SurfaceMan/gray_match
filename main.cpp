@@ -1,10 +1,35 @@
 #include "grayMatch.h"
 
 #include <iostream>
+#include <opencv2/core/utility.hpp>
 #include <opencv2/opencv.hpp>
+#include <string>
 
-int main() {
-    auto src = cv::imread(std::string(IMG_DIR) + "/model3.png", cv::IMREAD_GRAYSCALE);
+int main(int argc, const char *argv[]) {
+    const std::string keys = "{model m || model image}"
+                             "{scene s || scene image}"
+                             "{view v || view result}"
+                             "{help h || print this help}";
+
+    cv::CommandLineParser cmd(argc, argv, keys);
+    if (!cmd.check()) {
+        cmd.printErrors();
+        return -1;
+    }
+
+    if (cmd.has("help")) {
+        cmd.printMessage();
+        return 0;
+    }
+
+    auto srcFile = std::string(IMG_DIR) + "/model3.png";
+    auto dstFile = std::string(IMG_DIR) + "/model3_src2.png";
+    if (cmd.has("model"))
+        srcFile = cmd.get<std::string>("model");
+    if (cmd.has("scene"))
+        dstFile = cmd.get<std::string>("scene");
+
+    auto src = cv::imread(srcFile, cv::IMREAD_GRAYSCALE);
     auto dst = cv::imread(std::string(IMG_DIR) + "/model3_src2.png", cv::IMREAD_GRAYSCALE);
     if (src.empty() || dst.empty()) {
         return -1;
@@ -41,8 +66,10 @@ int main() {
             std::endl;
     }
 
-    cv::imshow("img", color);
-    cv::waitKey();
+    if (cmd.has("view")) {
+        cv::imshow("img", color);
+        cv::waitKey();
+    }
 
     return 0;
 }
