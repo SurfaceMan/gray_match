@@ -3,6 +3,8 @@
 
 #include <opencv2/opencv.hpp>
 
+#include "apiExport.h"
+
 struct Model;
 
 struct Pose {
@@ -12,11 +14,11 @@ struct Pose {
     float score;
 };
 
-Model *trainModel(const cv::Mat &src, int level, double startAngle, double spanAngle,
-                  double angleStep);
+API_PUBLIC Model *trainModel(const cv::Mat &src, int level, double startAngle, double spanAngle,
+                             double angleStep);
 
-std::vector<Pose> matchModel(const cv::Mat &dst, const Model *model, int level, double startAngle,
-                             double spanAngle, double maxOverlap, double minScore, int maxCount,
-                             int subpixel);
+API_PUBLIC void matchModel(const cv::Mat &dst, const Model *model, int *count, Pose *poses,
+                           int level, double startAngle, double spanAngle, double maxOverlap,
+                           double minScore, int subpixel);
 
 #endif // GRAY_MATCH_H

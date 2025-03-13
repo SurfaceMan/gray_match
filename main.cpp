@@ -10,11 +10,14 @@ int main() {
         return -1;
     }
 
+    int               count = 70;
+    std::vector<Pose> poses(count);
+
     auto t0    = cv::getTickCount();
     auto model = trainModel(src, -1, 0, 360, -1);
     auto t1    = cv::getTickCount();
-    auto poses = matchModel(dst, model, -1, 0, 360, 0, 0.5, 70, 1);
-    auto t2    = cv::getTickCount();
+    matchModel(dst, model, &count, poses.data(), -1, 0, 360, 0, 0.5, 1);
+    auto t2 = cv::getTickCount();
 
     const auto trainCost = static_cast<double>(t1 - t0) / cv::getTickFrequency();
     const auto matchCost = static_cast<double>(t2 - t1) / cv::getTickFrequency();
@@ -22,7 +25,8 @@ int main() {
 
     cv::Mat color;
     cv::cvtColor(dst, color, cv::COLOR_GRAY2RGB);
-    for (const auto &pose : poses) {
+    for (int i = 0; i < count; i++) {
+        const auto     &pose = poses[ i ];
         cv::RotatedRect rect(cv::Point2f(pose.x, pose.y), src.size(), -pose.angle);
 
         cv::Point2f pts[ 4 ];

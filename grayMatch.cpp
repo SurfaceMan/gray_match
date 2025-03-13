@@ -631,25 +631,32 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
     return levelMatched;
 }
 
-std::vector<Pose> matchModel(const cv::Mat &dst, const Model *model, int level, double startAngle,
-                             double spanAngle, const double maxOverlap, const double minScore,
-                             const int maxCount, const int subpixel) {
+void matchModel(const cv::Mat &dst, const Model *model, int *count, Pose *poses, int level,
+                double startAngle, double spanAngle, double maxOverlap, double minScore,
+                int subpixel) {
     (void)(subpixel);
 
     // prepare
     {
-        if (dst.empty() || nullptr == model || model->layers.empty()) {
-            return {};
+        if (nullptr == count) {
+            return;
+        }
+
+        if (dst.empty() || nullptr == model || nullptr == poses || model->layers.empty()) {
+            *count = 0;
+            return;
         }
 
         if (dst.cols < model->srcSize.width || dst.rows < model->srcSize.height ||
             dst.size().area() < model->srcSize.area()) {
-            return {};
+            *count = 0;
+            return;
         }
 
         // TODO angle cross 0/360
         if (spanAngle <= 0) {
-            return {};
+            *count = 0;
+            return;
         }
         if (spanAngle > 360) {
             spanAngle = 360;
@@ -679,13 +686,14 @@ std::vector<Pose> matchModel(const cv::Mat &dst, const Model *model, int level, 
     // match top
     const auto candidates =
         matchTopLevel(pyramids.back(), model->layers[ level ], model->startAngle, startAngle,
-                      spanAngle, maxOverlap, minScore, maxCount, level);
+                      spanAngle, maxOverlap, minScore, *count, level);
 
     // match candidate each level
     auto levelMatched =
         matchDownLevel(pyramids, model->startAngle, candidates, minScore, subpixel, model, level);
     if (levelMatched.empty()) {
-        return {};
+        *count = 0;
+        return;
     }
 
     // filter overlap
@@ -699,20 +707,20 @@ std::vector<Pose> matchModel(const cv::Mat &dst, const Model *model, int level, 
         filterOverlap(levelMatched, rects, maxOverlap);
     }
 
-    std::vector<Pose> result;
+    int index = 0;
     for (const auto &candidate : levelMatched) {
         if (candidate.score < 0) {
             continue;
         }
 
-        result.emplace_back(
+        poses[ index++ ] =
             Pose{static_cast<float>(candidate.pos.x), static_cast<float>(candidate.pos.y),
-                 static_cast<float>(candidate.angle), static_cast<float>(candidate.score)});
+                 static_cast<float>(candidate.angle), static_cast<float>(candidate.score)};
 
-        if (result.size() >= static_cast<std::size_t>(maxCount)) {
+        if (index >= *count) {
             break;
         }
     }
 
-    return result;
+    *count = index;
 }

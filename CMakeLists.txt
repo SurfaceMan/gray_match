@@ -15,25 +15,43 @@ if(ENABLE_OPENMP)
         endif(OPENMP_FOUND)
 endif(ENABLE_OPENMP)
 
-add_executable(${PROJECT_NAME}
-    main.cpp
+#==============================================================
+#library
+#==============================================================
+add_library(algo SHARED
     grayMatch.h
     grayMatch.cpp
     sum.h
     sum.cpp
     privateType.h
+    apiExport.h
 )
 
-target_include_directories(${PROJECT_NAME} PRIVATE ${OpenCV_INCLUDE_DIRS})
-target_link_libraries(${PROJECT_NAME} ${OpenCV_LIBRARIES} $<$<BOOL:${OPENMP_FOUND}>:OpenMP::OpenMP_CXX>)
-target_compile_options(${PROJECT_NAME} PRIVATE
+target_include_directories(algo PRIVATE ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(algo ${OpenCV_LIBRARIES} $<$<BOOL:${OPENMP_FOUND}>:OpenMP::OpenMP_CXX>)
+target_compile_options(algo PRIVATE
         $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX /external:W0>
         $<$<STREQUAL:${CMAKE_SYSTEM_NAME},Linux>:-fPIC -fvisibility=hidden -Wall -Wextra -Wpedantic -Wmisleading-indentation -Wunused -Wuninitialized -Wshadow -Wconversion -Werror>
         $<$<AND:$<CXX_COMPILER_ID:Clang>,$<STREQUAL:${CMAKE_SYSTEM_NAME},Windows>>:/W4 /WX /external:W0>
         $<$<STREQUAL:${CMAKE_SYSTEM_PROCESSOR},loongarch64>:-mlsx>
 )
-target_compile_definitions(${PROJECT_NAME} PRIVATE
+target_compile_definitions(algo PRIVATE  API_EXPORTS
         $<$<STREQUAL:${CMAKE_SYSTEM_PROCESSOR},loongarch64>:CV_LSX>
+)
+
+#==============================================================
+#exe
+#==============================================================
+add_executable(${PROJECT_NAME}
+    main.cpp
+)
+
+target_include_directories(${PROJECT_NAME} PRIVATE ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(${PROJECT_NAME} ${OpenCV_LIBRARIES} algo)
+target_compile_options(${PROJECT_NAME} PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX /external:W0>
+        $<$<STREQUAL:${CMAKE_SYSTEM_NAME},Linux>: -fPIC -fvisibility=hidden -Wall -Wextra -Wpedantic -Wmisleading-indentation -Wunused -Wuninitialized -Wshadow -Wconversion -Werror>
+        $<$<AND:$<CXX_COMPILER_ID:Clang>,$<STREQUAL:${CMAKE_SYSTEM_NAME},Windows>>:/W4 /WX /external:W0>
 )
 target_compile_definitions(${PROJECT_NAME} PRIVATE IMG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/img")
 
