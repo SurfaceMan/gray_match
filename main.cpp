@@ -51,8 +51,7 @@ int main(int argc, const char *argv[]) {
     std::cout << "train(s):" << trainCost << " match(s):" << matchCost << std::endl;
     for (int i = 0; i < count; i++) {
         const auto &pose = poses[ i ];
-        std::cout << pose.x << "," << pose.y << "," << pose.angle << "," << pose.score << //
-            std::endl;
+        std::cout << pose.x << "," << pose.y << "," << pose.angle << "," << pose.score << std::endl;
     }
 
     if (cmd.has("view")) {
