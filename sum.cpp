@@ -127,7 +127,7 @@ void shiftH(const uchar *src, std::size_t srcStep, const HRegion &hRegion, int r
     std::array<int, 4> buf;
 
     int i = 1;
-    for (; i < sumWidth - blockSize; i += blockSize) {
+    for (; i < sumWidth; i += blockSize) {
         cv::v_int32x4 diff0 = cv::v_setzero_s32();
         cv::v_int32x4 diff1 = cv::v_setzero_s32();
         cv::v_int32x4 diff2 = cv::v_setzero_s32();
@@ -168,25 +168,6 @@ void shiftH(const uchar *src, std::size_t srcStep, const HRegion &hRegion, int r
         cv::v_store(buf.data(), diff13);
         v_expand_store(sqSumPtrStart + 12, buf);
     }
-
-    for (; i < sumWidth; i++) {
-        int32_t partSum   = 0;
-        int32_t partSqSum = 0;
-        for (const auto &rle : hRegion) {
-            auto *startPtr = srcPtr + (row + rle.row) * srcStep + rle.startColumn + i - 1;
-            auto *endPtr   = startPtr + rle.length;
-
-            int32_t start  = *startPtr;
-            int32_t end    = *endPtr;
-            partSum       += end - start;
-            partSqSum     += end * end - start * start;
-        }
-
-        auto *sumPtrStart   = sumPtr + i;
-        sumPtrStart[ 0 ]    = sumPtrStart[ -1 ] + partSum;
-        auto *sqSumPtrStart = sqSumPtr + i;
-        sqSumPtrStart[ 0 ]  = sqSumPtrStart[ -1 ] + partSqSum;
-    }
 }
 
 void shiftV(const uchar *src, std::size_t srcStep, const VRegion &vRegion, int row, double *sum,
@@ -215,8 +196,15 @@ void shiftV(const uchar *src, std::size_t srcStep, const VRegion &vRegion, int r
 void integralSum(const cv::Mat &src, cv::Mat &sum, cv::Mat &sqSum, const cv::Size &templateSize,
                  const HRegion &hRegion, const VRegion &vRegion) {
     const auto size = src.size() - templateSize + cv::Size(1, 1);
-    sum.create(size, CV_64FC1);
-    sqSum.create(size, CV_64FC1);
+    {
+        auto alignedWidth = cv::alignSize(size.width, simdSize(cv::v_uint8));
+
+        cv::Mat tmpSum((int)size.height, (int)alignedWidth, CV_64FC1);
+        sum = tmpSum(cv::Rect(0, 0, size.width, size.height));
+
+        cv::Mat tmpSqSum((int)size.height, (int)alignedWidth, CV_64FC1);
+        sqSum = tmpSqSum(cv::Rect(0, 0, size.width, size.height));
+    }
 
     auto *srcPtr    = src.data;
     auto *sumPtr    = (double *)sum.data;

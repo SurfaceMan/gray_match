@@ -635,7 +635,7 @@ void buildPyramid(const cv::Mat &src, std::vector<cv::Mat> &dst, int level) {
     dst.resize(level + 1);
     auto alignedWidth = cv::alignSize(src.cols, simdSize(cv::v_uint8));
     if (alignedWidth != src.cols) {
-        cv::Mat img(src.rows, alignedWidth, CV_8UC1);
+        cv::Mat img(src.rows, (int)alignedWidth, CV_8UC1);
         dst[ 0 ] = img(cv::Rect(0, 0, src.cols, src.rows));
     }
     dst[ 0 ] = src;
@@ -645,7 +645,7 @@ void buildPyramid(const cv::Mat &src, std::vector<cv::Mat> &dst, int level) {
         alignedWidth = cv::alignSize(width, simdSize(cv::v_uint8));
         auto height  = dst[ i - 1 ].rows / 2;
 
-        cv::Mat img(height, alignedWidth, CV_8UC1);
+        cv::Mat img(height, (int)alignedWidth, CV_8UC1);
         dst[ i ] = img(cv::Rect(0, 0, width, height));
 
         cv::pyrDown(dst[ i - 1 ], dst[ i ], cv::Size(width, height));
@@ -695,7 +695,7 @@ std::vector<Pose> matchModel(const cv::Mat &dst, const Model *model, int level, 
     // TODO copyMakeBorder to enable part match
 
     std::vector<cv::Mat> pyramids;
-    cv::buildPyramid(dst, pyramids, level);
+    buildPyramid(dst, pyramids, level);
 
     // match top
     const auto candidates =
