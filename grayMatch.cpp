@@ -631,27 +631,6 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
     return levelMatched;
 }
 
-void buildPyramid(const cv::Mat &src, std::vector<cv::Mat> &dst, int level) {
-    dst.resize(level + 1);
-    auto alignedWidth = cv::alignSize(src.cols, simdSize(cv::v_uint8));
-    if (alignedWidth != src.cols) {
-        cv::Mat img(src.rows, alignedWidth, CV_8UC1);
-        dst[ 0 ] = img(cv::Rect(0, 0, src.cols, src.rows));
-    }
-    dst[ 0 ] = src;
-
-    for (int i = 1; i <= level; i++) {
-        auto width   = dst[ i - 1 ].cols / 2;
-        alignedWidth = cv::alignSize(width, simdSize(cv::v_uint8));
-        auto height  = dst[ i - 1 ].rows / 2;
-
-        cv::Mat img(height, alignedWidth, CV_8UC1);
-        dst[ i ] = img(cv::Rect(0, 0, width, height));
-
-        cv::pyrDown(dst[ i - 1 ], dst[ i ], cv::Size(width, height));
-    }
-}
-
 std::vector<Pose> matchModel(const cv::Mat &dst, const Model *model, int level, double startAngle,
                              double spanAngle, const double maxOverlap, const double minScore,
                              const int maxCount, const int subpixel) {
