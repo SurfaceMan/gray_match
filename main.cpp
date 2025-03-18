@@ -10,6 +10,7 @@ int main(int argc, const char *argv[]) {
                              "{scene s || scene image}"
                              "{view v || view result}"
                              "{threshold t | 0.7 | match minium score}"
+                             "{bench b || match bechmark}"
                              "{help h || print this help}";
 
     cv::CommandLineParser cmd(argc, argv, keys);
@@ -52,6 +53,20 @@ int main(int argc, const char *argv[]) {
     for (int i = 0; i < count; i++) {
         const auto &pose = poses[ i ];
         std::cout << pose.x << "," << pose.y << "," << pose.angle << "," << pose.score << std::endl;
+    }
+
+    if (cmd.has("bench")) {
+        const int times = 100;
+
+        auto start = cv::getTickCount();
+        for (int i = 0; i < times; i++) {
+            matchModel(dst, model, &count, poses.data(), -1, 0, 360, 0, score, 1);
+            count = 70;
+        }
+        auto end = cv::getTickCount();
+
+        const auto cost = static_cast<double>(end - start) / cv::getTickFrequency() / times;
+        std::cout << "match bench avg(s):" << cost << std::endl;
     }
 
     if (cmd.has("view")) {
