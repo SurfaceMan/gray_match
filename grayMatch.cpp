@@ -879,7 +879,7 @@ void freeModel(Model_t *model) {
     *model = nullptr;
 }
 
-int modelLevel(const Model *model) {
+int modelLevel(const Model_t model) {
     if (nullptr == model) {
         return 0;
     }
@@ -887,7 +887,7 @@ int modelLevel(const Model *model) {
     return static_cast<int>(model->pyramids.size());
 }
 
-void modelImage(const Model *model, int level, unsigned char *data, int length, int *width,
+void modelImage(const Model_t model, int level, unsigned char *data, int length, int *width,
                 int *height, int *channels) {
     if (nullptr == model) {
         return;
