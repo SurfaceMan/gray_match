@@ -10,4 +10,4 @@
 |train-omp|1|160|1/160|
 |match-omp|12|6|2|
 
-result: main brain mathod train model really fast(1ms), rotate-model method 2x faster in matching.
+result: main brain method train model really fast(1ms) and parameter free, rotate-model method 2x faster in matching.
