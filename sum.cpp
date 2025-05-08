@@ -176,10 +176,10 @@ void shiftH(const uchar *src, std::size_t srcStep, const HRegion &hRegion, int r
             auto *startPtr = srcPtr + (row + rle.row) * srcStep + rle.startColumn + i - 1;
             auto *endPtr   = startPtr + rle.length;
 
-            int32_t start  = *startPtr;
-            int32_t end    = *endPtr;
-            partSum       += end - start;
-            partSqSum     += end * end - start * start;
+            const int32_t start  = *startPtr;
+            const int32_t end    = *endPtr;
+            partSum             += end - start;
+            partSqSum           += end * end - start * start;
         }
 
         auto *sumPtrStart   = sumPtr + i;
