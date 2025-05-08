@@ -114,7 +114,7 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const HRe
                        cv::Mat &result) {
     result.create(src.size() - templateImg.size() + cv::Size(1, 1), CV_32FC1);
 
-    auto       *resultStart = (float *)result.data;
+    auto       *resultStart = reinterpret_cast<float *>(result.data);
     const auto  resultStep  = result.step1();
     const auto *srcStart    = src.data;
     const auto  srcStep     = src.step1();
@@ -160,7 +160,7 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const HRe
         }
 
         for (int x = 0; x < result.cols; x++) {
-            auto sum       = cv::v_reduce_sum(tmp[ x ]);
+            const auto sum = cv::v_reduce_sum(tmp[ x ]);
             tmp[ x ]       = cv::v_setzero_u32();
             resultPtr[ x ] = static_cast<float>(sum);
         }
@@ -168,33 +168,33 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, const HRe
 }
 
 void ccoeffDenominator(const cv::Mat &src, const cv::Size &tempSize, const HRegion &hRegion,
-                       const VRegion &vRegion, cv::Mat &result, const double mean,
+                       const VRegion &vRegion, const cv::Mat &result, const double mean,
                        const double normal, const double invArea) {
     cv::Mat sumImg;
     cv::Mat sqSumImg;
     integralSum(src, sumImg, sqSumImg, tempSize, hRegion, vRegion);
 
-    auto      *resultStart   = (float *)result.data;
-    const auto resultStep    = result.step1();
-    auto      *sumStartPtr   = (double *)sumImg.data;
-    const auto sumStep       = sumImg.step1();
-    auto      *sqSumStartPtr = (double *)sqSumImg.data;
-    const auto sqSumStep     = sqSumImg.step1();
+    auto       *resultStart   = reinterpret_cast<float *>(result.data);
+    const auto  resultStep    = result.step1();
+    const auto *sumStartPtr   = reinterpret_cast<double *>(sumImg.data);
+    const auto  sumStep       = sumImg.step1();
+    const auto *sqSumStartPtr = reinterpret_cast<double *>(sqSumImg.data);
+    const auto  sqSumStep     = sqSumImg.step1();
 
     for (int y = 0; y < result.rows; y++) {
-        auto *resultPtr = resultStart + resultStep * y;
-        auto *sumPtr    = sumStartPtr + sumStep * y;
-        auto *sqSumPtr  = sqSumStartPtr + sqSumStep * y;
+        auto       *resultPtr = resultStart + resultStep * y;
+        const auto *sumPtr    = sumStartPtr + sumStep * y;
+        const auto *sqSumPtr  = sqSumStartPtr + sqSumStep * y;
         for (int x = 0; x < result.cols; x++) {
-            auto &score = resultPtr[ x ];
-            auto  sum   = sumPtr[ x ];
-            auto  sqSum = sqSumPtr[ x ];
+            auto      &score = resultPtr[ x ];
+            const auto sum   = sumPtr[ x ];
+            const auto sqSum = sqSumPtr[ x ];
 
             const auto numerator    = static_cast<double>(score) - sum * mean;
-            const auto partSqNormal = sqSum - static_cast<double>(sum * sum) * invArea;
+            const auto partSqNormal = sqSum - sum * sum * invArea;
             const auto diff         = std::max(partSqNormal, 0.);
             const auto denominator =
-                (diff <= std::min(0.5, 10 * FLT_EPSILON * sqSum)) ? 0 : sqrt(diff) * normal;
+                diff <= std::min(0.5, 10 * FLT_EPSILON * sqSum) ? 0 : sqrt(diff) * normal;
 
             if (abs(numerator) < denominator) {
                 score = static_cast<float>(numerator / denominator);
@@ -235,8 +235,8 @@ void nextMaxLoc(cv::Mat &score, const cv::Point &pos, const cv::RotatedRect &rec
 
     auto rectIgnore         = rect;
     rectIgnore.center       = cv::Point2f(pos);
-    rectIgnore.size.width  *= (2 * alone);
-    rectIgnore.size.height *= (2 * alone);
+    rectIgnore.size.width  *= 2 * alone;
+    rectIgnore.size.height *= 2 * alone;
 
     // clear neighbor
     std::vector<cv::Point2f> pts;
@@ -634,7 +634,7 @@ std::vector<Candidate> matchDownLevel(const std::vector<cv::Mat>   &pyramids,
 void matchModel(const cv::Mat &dst, const Model *model, int *count, Pose *poses, int level,
                 double startAngle, double spanAngle, double maxOverlap, double minScore,
                 int subpixel) {
-    (void)(subpixel);
+    (void)subpixel;
 
     // prepare
     {

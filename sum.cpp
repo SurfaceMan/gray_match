@@ -23,21 +23,21 @@ inline void computeSum(const cv::v_uint8x16 &src, cv::v_uint32x4 &sum, cv::v_uin
     cv::v_uint16x8 high;
     cv::v_expand(src, low, high);
 
-    sum      = cv::v_add(sum, v_add_expand(cv::v_add(low, high)));
-    auto dot = cv::v_dotprod_expand_fast(src, src);
-    sqSum    = cv::v_add(sqSum, v_add_expand(dot));
+    sum            = cv::v_add(sum, v_add_expand(cv::v_add(low, high)));
+    const auto dot = cv::v_dotprod_expand_fast(src, src);
+    sqSum          = cv::v_add(sqSum, v_add_expand(dot));
 }
 
 void computeSum(const cv::Mat &src, const HRegion &hRegion, uint64 &sum, uint64 &sqSum) {
     constexpr auto blockSize = simdSize(cv::v_uint8);
-    auto          *srcPtr    = src.data;
+    const auto    *srcPtr    = src.data;
     cv::v_uint32x4 vSum      = cv::v_setzero_u32();
     cv::v_uint64x2 vSqSum    = cv::v_setzero_u64();
     uint32_t       partSum   = 0;
     uint64         partSqSum = 0;
 
     for (const auto &rle : hRegion) {
-        auto *ptr = srcPtr + src.step * rle.row + rle.startColumn;
+        const auto *ptr = srcPtr + src.step * rle.row + rle.startColumn;
 
         int i = 0;
         for (; i < rle.length - blockSize; i += blockSize) {
@@ -46,9 +46,9 @@ void computeSum(const cv::Mat &src, const HRegion &hRegion, uint64 &sum, uint64 
 
         // TODO aligned fill 0
         for (; i < rle.length; i++) {
-            auto val   = ptr[ i ];
-            partSum   += val;
-            partSqSum += (ushort)val * (ushort)val;
+            const auto val  = ptr[ i ];
+            partSum        += val;
+            partSqSum      += static_cast<ushort>(val) * static_cast<ushort>(val);
         }
     }
 
@@ -60,9 +60,9 @@ inline void computeSumDiff(const cv::v_uint16x8 &start, const cv::v_uint16x8 &en
                            cv::v_int32x4 &diff0, cv::v_int32x4 &diff1) {
     cv::v_int16x8 sub;
     {
-        auto vStart = cv::v_reinterpret_as_s16(start);
-        auto vEnd   = cv::v_reinterpret_as_s16(end);
-        sub         = cv::v_sub(vEnd, vStart);
+        const auto vStart = cv::v_reinterpret_as_s16(start);
+        const auto vEnd   = cv::v_reinterpret_as_s16(end);
+        sub               = cv::v_sub(vEnd, vStart);
     }
 
     cv::v_int32x4 val = cv::v_expand_low(sub);
@@ -81,11 +81,11 @@ inline void computeSumDiff(const cv::v_uint8x16 &start, const cv::v_uint8x16 &en
 
 inline void computeSqSumDiff(const cv::v_uint32x4 &start, const cv::v_uint32x4 &end,
                              cv::v_int32x4 &diff0) {
-    cv::v_int32x4 vStart = cv::v_reinterpret_as_s32(start);
-    cv::v_int32x4 vEnd   = cv::v_reinterpret_as_s32(end);
+    const cv::v_int32x4 vStart = cv::v_reinterpret_as_s32(start);
+    const cv::v_int32x4 vEnd   = cv::v_reinterpret_as_s32(end);
 
-    cv::v_int32x4 sub = cv::v_sub(vEnd, vStart);
-    diff0             = cv::v_add(diff0, sub);
+    const cv::v_int32x4 sub = cv::v_sub(vEnd, vStart);
+    diff0                   = cv::v_add(diff0, sub);
 }
 
 inline void computeSqSumDiff(cv::v_uint16x8 &start, cv::v_uint16x8 &end, cv::v_int32x4 &diff0,
@@ -124,7 +124,7 @@ void shiftH(const uchar *src, std::size_t srcStep, const HRegion &hRegion, int r
     auto          *sumPtr    = sum + row * sumStep;
     auto          *sqSumPtr  = sqSum + row * sqSumStep;
 
-    std::array<int, 4> buf;
+    std::array<int, 4> buf{};
 
     int i = 1;
     for (; i < sumWidth - blockSize; i += blockSize) {
@@ -201,8 +201,8 @@ void shiftV(const uchar *src, std::size_t srcStep, const VRegion &vRegion, int r
         auto *startPtr = srcPtr + (row + rle.startRow - 1) * srcStep + rle.col;
         auto *endPtr   = startPtr + rle.length * srcStep;
 
-        int32_t start = *startPtr;
-        int32_t end   = *endPtr;
+        const int32_t start = *startPtr;
+        const int32_t end   = *endPtr;
 
         partSum   += end - start;
         partSqSum += end * end - start * start;
@@ -218,11 +218,11 @@ void integralSum(const cv::Mat &src, cv::Mat &sum, cv::Mat &sqSum, const cv::Siz
     sum.create(size, CV_64FC1);
     sqSum.create(size, CV_64FC1);
 
-    auto *srcPtr    = src.data;
-    auto *sumPtr    = (double *)sum.data;
-    auto *sqSumPtr  = (double *)sqSum.data;
-    auto  sumStep   = sum.step1();
-    auto  sqSumStep = sqSum.step1();
+    const auto *srcPtr    = src.data;
+    auto       *sumPtr    = reinterpret_cast<double *>(sum.data);
+    auto       *sqSumPtr  = reinterpret_cast<double *>(sqSum.data);
+    const auto  sumStep   = sum.step1();
+    const auto  sqSumStep = sqSum.step1();
 
     // compute first
     uint64 sum0;
