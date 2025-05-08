@@ -10,7 +10,7 @@ int main(int argc, const char *argv[]) {
                              "{scene s || scene image}"
                              "{view v || view result}"
                              "{threshold t | 0.7 | match minium score}"
-                             "{bench b || match bechmark}"
+                             "{bench b || match benchmark}"
                              "{help h || print this help}";
 
     cv::CommandLineParser cmd(argc, argv, keys);
@@ -56,7 +56,7 @@ int main(int argc, const char *argv[]) {
     }
 
     if (cmd.has("bench")) {
-        const int times = 100;
+        constexpr int times = 100;
 
         auto start = cv::getTickCount();
         for (int i = 0; i < times; i++) {
