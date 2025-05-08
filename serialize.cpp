@@ -5,7 +5,7 @@
 
 class Buffer {
 public:
-    Buffer(int size_, unsigned char *data_)
+    Buffer(const int size_, unsigned char *data_)
         : m_size(size_)
         , m_data(data_) {}
 
@@ -35,29 +35,29 @@ protected:
     unsigned char *m_data = nullptr;
 };
 
-void binWrite(void *dst, void *src, int size) {
+void binWrite(void *const dst, const void *src, const int size) {
     memcpy(dst, src, size);
 }
 
-void fakeWrite(void *dst, void *src, int size) {
-    (void)(dst);
-    (void)(src);
-    (void)(size);
+void fakeWrite(void *const dst, const void *src, const int size) {
+    (void)dst;
+    (void)src;
+    (void)size;
 }
 
-using Write = void (*)(void *, void *, int);
+using Write = void (*)(void *, const void *, int);
 
-template <Write write> class OutBuffer : public Buffer {
+template <Write write> class OutBuffer final : public Buffer {
 public:
-    explicit OutBuffer(unsigned char *data_)
+    explicit OutBuffer(unsigned char *const data_)
         : Buffer(0, data_) {}
 
-    void operator&(uchar &val) final {
+    void operator&(uchar &val) override {
         write(m_data + m_size, &val, sizeof(val));
         m_size += static_cast<int>(sizeof(val));
     }
-    void operator&(std::vector<cv::Mat> &val) final {
-        int size = static_cast<int>(val.size());
+    void operator&(std::vector<cv::Mat> &val) override {
+        const int size = static_cast<int>(val.size());
         write(m_data + m_size, &size, sizeof(size));
         m_size += static_cast<int>(sizeof(size));
 
@@ -77,8 +77,8 @@ public:
             m_size += val.cols;
         }
     }
-    void operator&(std::vector<cv::Scalar> &val) final {
-        int size = static_cast<int>(val.size());
+    void operator&(std::vector<cv::Scalar> &val) override {
+        const int size = static_cast<int>(val.size());
         write(m_data + m_size, &size, sizeof(size));
         m_size += static_cast<int>(sizeof(size));
 
@@ -86,20 +86,20 @@ public:
             writeElement(element);
         }
     }
-    void writeElement(cv::Scalar &val) {
+    void writeElement(const cv::Scalar &val) {
         write(m_data + m_size, val.val, sizeof(double) * 4);
         m_size += static_cast<int>(sizeof(double)) * 4;
     }
-    void operator&(std::vector<double> &val) final {
-        int size = static_cast<int>(val.size());
+    void operator&(std::vector<double> &val) override {
+        const int size = static_cast<int>(val.size());
         write(m_data + m_size, &size, sizeof(size));
         m_size += static_cast<int>(sizeof(size));
 
         write(m_data + m_size, val.data(), static_cast<int>(sizeof(double)) * size);
         m_size += static_cast<int>(sizeof(double)) * size;
     }
-    void operator&(std::vector<uchar> &val) final {
-        int size = static_cast<int>(val.size());
+    void operator&(std::vector<uchar> &val) override {
+        const int size = static_cast<int>(val.size());
         write(m_data + m_size, &size, sizeof(size));
         m_size += static_cast<int>(sizeof(size));
 
@@ -111,16 +111,16 @@ public:
 using SizeCountBuffer = OutBuffer<fakeWrite>;
 using WriteBuffer     = OutBuffer<binWrite>;
 
-class ReadBuffer : public Buffer {
+class ReadBuffer final : public Buffer {
 public:
     explicit ReadBuffer(unsigned char *data_)
         : Buffer(0, data_) {}
 
-    void operator&(uchar &val) final {
+    void operator&(uchar &val) override {
         memcpy(&val, m_data + m_size, sizeof(uchar));
         m_size += static_cast<int>(sizeof(uchar));
     }
-    void operator&(std::vector<cv::Mat> &val) final {
+    void operator&(std::vector<cv::Mat> &val) override {
         int count = 0;
         memcpy(&count, m_data + m_size, sizeof(int));
         val.resize(count);
@@ -139,9 +139,9 @@ public:
         memcpy(&height, m_data + m_size, sizeof(int));
         m_size += static_cast<int>(sizeof(int));
 
-        int  alignedWidth = static_cast<int>(cv::alignSize(width, simdSize(cv::v_uint8)));
-        auto img          = cv::Mat::zeros(height, alignedWidth, CV_8UC1);
-        val               = img(cv::Rect(0, 0, width, height));
+        const int  alignedWidth = static_cast<int>(cv::alignSize(width, simdSize(cv::v_uint8)));
+        const auto img          = cv::Mat::zeros(height, alignedWidth, CV_8UC1);
+        val                     = img(cv::Rect(0, 0, width, height));
 
         for (int y = 0; y < height; y++) {
             auto *ptr = val.ptr<uchar>(y);
@@ -149,7 +149,7 @@ public:
             m_size += width;
         }
     }
-    void operator&(std::vector<cv::Scalar> &val) final {
+    void operator&(std::vector<cv::Scalar> &val) override {
         int count = 0;
         memcpy(&count, m_data + m_size, sizeof(int));
         val.resize(count);
@@ -163,7 +163,7 @@ public:
         memcpy(val.val, m_data + m_size, sizeof(double) * 4);
         m_size += static_cast<int>(sizeof(double)) * 4;
     }
-    void operator&(std::vector<double> &val) final {
+    void operator&(std::vector<double> &val) override {
         int count = 0;
         memcpy(&count, m_data + m_size, sizeof(int));
         val.resize(count);
@@ -172,7 +172,7 @@ public:
         memcpy(val.data(), m_data + m_size, sizeof(double) * count);
         m_size += static_cast<int>(sizeof(double)) * count;
     }
-    void operator&(std::vector<uchar> &val) final {
+    void operator&(std::vector<uchar> &val) override {
         int count = 0;
         memcpy(&count, m_data + m_size, sizeof(int));
         val.resize(count);
@@ -184,10 +184,10 @@ public:
 };
 
 void operation(Buffer *buf, Model &model) {
-    (*buf) & (model);
+    *buf &model;
 }
 
-bool serialize(const Model_t model, unsigned char *buffer, int *size) {
+bool serialize(Model *const model, unsigned char *buffer, int *size) {
     if (nullptr == size) {
         return false;
     }
@@ -215,7 +215,7 @@ bool serialize(const Model_t model, unsigned char *buffer, int *size) {
     return true;
 }
 
-Model_t deserialize(unsigned char *buffer, int size) {
+Model_t deserialize(unsigned char *buffer, const int size) {
     if (size < 1 || nullptr == buffer) {
         return nullptr;
     }

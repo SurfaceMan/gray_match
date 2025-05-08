@@ -10,7 +10,7 @@ int main(int argc, const char *argv[]) {
                              "{scene s || scene image}"
                              "{view v || view result}"
                              "{threshold t | 0.7 | match minium score}"
-                             "{bench b || match bechmark}"
+                             "{bench b || match benchmark}"
                              "{help h || print this help}";
 
     cv::CommandLineParser cmd(argc, argv, keys);
@@ -40,8 +40,8 @@ int main(int argc, const char *argv[]) {
     const std::string modelName("model.bin");
     {
         auto t0    = cv::getTickCount();
-        auto model = trainModel(src.data, src.cols, src.rows, src.channels(), int(src.step), 0, 0,
-                                src.cols, src.rows, -1);
+        auto model = trainModel(src.data, src.cols, src.rows, src.channels(),
+                                static_cast<int>(src.step), 0, 0, src.cols, src.rows, -1);
         auto t1    = cv::getTickCount();
 
         // get size
@@ -57,11 +57,11 @@ int main(int argc, const char *argv[]) {
         if (!ofs.is_open()) {
             return -1;
         }
-        ofs.write((const char *)buffer.data(), size);
+        ofs.write(reinterpret_cast<const char *>(buffer.data()), size);
 
         freeModel(&model);
 
-        auto trainCost = double(t1 - t0) / cv::getTickFrequency();
+        auto trainCost = static_cast<double>(t1 - t0) / cv::getTickFrequency();
         std::cout << "train(s):" << trainCost << std::endl;
     }
 
@@ -83,17 +83,17 @@ int main(int argc, const char *argv[]) {
 
         // read to buffer
         std::vector<uchar> buffer(size);
-        ifs.read((char *)buffer.data(), size);
+        ifs.read(reinterpret_cast<char *>(buffer.data()), size);
 
         // deserialize from buffer
-        model = deserialize(buffer.data(), int(buffer.size()));
+        model = deserialize(buffer.data(), static_cast<int>(buffer.size()));
 
         auto t2 = cv::getTickCount();
-        matchModel(dst.data, dst.cols, dst.rows, dst.channels(), int(dst.step), 0, 0, dst.cols,
-                   dst.rows, model, &count, poses.data(), -1, 0, 360, 0, score, 1);
+        matchModel(dst.data, dst.cols, dst.rows, dst.channels(), static_cast<int>(dst.step), 0, 0,
+                   dst.cols, dst.rows, model, &count, poses.data(), -1, 0, 360, 0, score, 1);
         auto t3 = cv::getTickCount();
 
-        auto matchCost = double(t3 - t2) / cv::getTickFrequency();
+        auto matchCost = static_cast<double>(t3 - t2) / cv::getTickFrequency();
         std::cout << "match(s):" << matchCost << std::endl;
     }
 
@@ -103,12 +103,12 @@ int main(int argc, const char *argv[]) {
     }
 
     if (cmd.has("bench")) {
-        const int times = 100;
+        constexpr int times = 100;
 
         auto start = cv::getTickCount();
         for (int i = 0; i < times; i++) {
-            matchModel(dst.data, dst.cols, dst.rows, dst.channels(), int(dst.step), 0, 0, dst.cols,
-                       dst.rows, model, &count, poses.data(), -1, 0, 360, 0, score, 1);
+            matchModel(dst.data, dst.cols, dst.rows, dst.channels(), static_cast<int>(dst.step), 0,
+                       0, dst.cols, dst.rows, model, &count, poses.data(), -1, 0, 360, 0, score, 1);
             count = 70;
         }
         auto end = cv::getTickCount();

@@ -260,7 +260,7 @@ void matchTemplateSimd(const cv::Mat &src, const cv::Mat &templateImg, cv::Mat &
         }
 
         for (int x = 0; x < result.cols; x++) {
-            auto sum       = cv::v_reduce_sum(tmp[ x ]);
+            const auto sum = cv::v_reduce_sum(tmp[ x ]);
             tmp[ x ]       = cv::v_setzero_u32();
             resultPtr[ x ] = static_cast<float>(sum);
         }
@@ -284,18 +284,18 @@ void ccoeffDenominator(const cv::Mat &src, const cv::Size &templateSize, cv::Mat
     cv::integral(src, sum, sqSum, CV_64F);
 #endif
 
-    const auto *q0 = (double *)sqSum.data;
+    const auto *q0 = reinterpret_cast<double *>(sqSum.data);
     const auto *q1 = q0 + templateSize.width;
-    const auto *q2 = (double *)sqSum.data + sqSum.step1() * templateSize.height;
+    const auto *q2 = reinterpret_cast<double *>(sqSum.data) + sqSum.step1() * templateSize.height;
     const auto *q3 = q2 + templateSize.width;
 
-    const auto *p0 = (double *)sum.data;
+    const auto *p0 = reinterpret_cast<double *>(sum.data);
     const auto *p1 = p0 + templateSize.width;
-    const auto *p2 = (double *)sum.data + sum.step1() * templateSize.height;
+    const auto *p2 = reinterpret_cast<double *>(sum.data) + sum.step1() * templateSize.height;
     const auto *p3 = p2 + templateSize.width;
 
     const auto step           = sum.step / sizeof(double);
-    auto      *resultStartPtr = (float *)result.data;
+    auto      *resultStartPtr = reinterpret_cast<float *>(result.data);
 
     for (int y = 0; y < result.rows; y++) {
         auto *scorePtr = resultStartPtr + y * result.step1();
@@ -305,12 +305,12 @@ void ccoeffDenominator(const cv::Mat &src, const cv::Size &templateSize, cv::Mat
             const auto partSum   = p0[ idx ] - p1[ idx ] - p2[ idx ] + p3[ idx ];
             const auto numerator = score - partSum * mean;
 
-            auto partSqSum    = q0[ idx ] - q1[ idx ] - q2[ idx ] + q3[ idx ];
-            auto partSqNormal = partSqSum - partSum * partSum * invArea;
+            const auto partSqSum    = q0[ idx ] - q1[ idx ] - q2[ idx ] + q3[ idx ];
+            auto       partSqNormal = partSqSum - partSum * partSum * invArea;
 
-            const auto diff = std::max(partSqNormal, 0.);
-            double     denominator =
-                (diff <= std::min(0.5, 10 * FLT_EPSILON * partSqSum)) ? 0 : sqrt(diff) * normal;
+            const auto   diff = std::max(partSqNormal, 0.);
+            const double denominator =
+                diff <= std::min(0.5, 10 * FLT_EPSILON * partSqSum) ? 0 : sqrt(diff) * normal;
 
             if (abs(numerator) < denominator) {
                 score = static_cast<float>(numerator / denominator);
@@ -365,23 +365,24 @@ void nextMaxLoc(cv::Mat &score, const cv::Point &pos, const cv::Size templateSiz
 }
 
 inline cv::Mat getRotationMatrix2D(const cv::Point2f &center, double angle) {
-    angle        *= CV_PI / 180;
-    double alpha  = std::cos(angle);
-    double beta   = std::sin(angle);
+    angle              *= CV_PI / 180;
+    const double alpha  = std::cos(angle);
+    const double beta   = std::sin(angle);
 
-    cv::Mat rotate(2, 3, CV_64FC1);
-    auto    ptr = rotate.ptr<double>();
-    ptr[ 0 ]    = alpha;
-    ptr[ 1 ]    = beta;
-    ptr[ 2 ]    = (1 - alpha) * center.x - beta * center.y;
-    ptr[ 3 ]    = -beta;
-    ptr[ 4 ]    = alpha;
-    ptr[ 5 ]    = beta * center.x + (1 - alpha) * center.y;
+    cv::Mat    rotate(2, 3, CV_64FC1);
+    const auto ptr = rotate.ptr<double>();
+    ptr[ 0 ]       = alpha;
+    ptr[ 1 ]       = beta;
+    ptr[ 2 ]       = (1 - alpha) * center.x - beta * center.y;
+    ptr[ 3 ]       = -beta;
+    ptr[ 4 ]       = alpha;
+    ptr[ 5 ]       = beta * center.x + (1 - alpha) * center.y;
 
     return rotate;
 }
 
-inline cv::Point2d transform(const cv::Point2d &point, const cv::Point &center, double angle) {
+inline cv::Point2d transform(const cv::Point2d &point, const cv::Point &center,
+                             const double angle) {
     const auto rotate = getRotationMatrix2D(center, angle);
 
     return transform(point, rotate);
@@ -522,7 +523,7 @@ std::vector<Candidate> matchTopLevel(const cv::Mat &dstTop, double startAngle, d
     auto        angleStep         = sizeAngleStep(templateTop.size());
     cv::Point2d center            = sizeCenter(dstTop.size());
     const auto  topScoreThreshold = minScore * pow(0.9, level);
-    bool calMaxByBlock = (dstTop.size().area() / templateTop.size().area() > 500) && maxCount > 10;
+    bool calMaxByBlock = dstTop.size().area() / templateTop.size().area() > 500 && maxCount > 10;
 
     const auto count = static_cast<int>(spanAngle / angleStep) + 1;
 #pragma omp parallel for reduction(combine : candidates)
@@ -590,15 +591,15 @@ cv::Point2f computeSubpixel(const cv::Mat &score) {
     cv::Point2f result(0, 0);
     auto       *mag = score.ptr<float>();
 
-    auto gx  = (-mag[ 0 ] + mag[ 2 ] - mag[ 3 ] + mag[ 5 ] - mag[ 6 ] + mag[ 8 ]) / 3.0f;
-    auto gy  = (mag[ 6 ] + mag[ 7 ] + mag[ 8 ] - mag[ 0 ] - mag[ 1 ] - mag[ 2 ]) / 3.0f;
-    auto gxx = (mag[ 0 ] - 2.0f * mag[ 1 ] + mag[ 2 ] + mag[ 3 ] - 2.0f * mag[ 4 ] + mag[ 5 ] +
-                mag[ 6 ] - 2.0f * mag[ 7 ] + mag[ 8 ]) /
-               6.0f;
-    auto gxy = (-mag[ 0 ] + mag[ 2 ] + mag[ 6 ] - mag[ 8 ]) / 2.0f;
-    auto gyy = (mag[ 0 ] + mag[ 1 ] + mag[ 2 ] - 2.0f * (mag[ 3 ] + mag[ 4 ] + mag[ 5 ]) +
-                mag[ 6 ] + mag[ 7 ] + mag[ 8 ]) /
-               6.0f;
+    const auto gx  = (-mag[ 0 ] + mag[ 2 ] - mag[ 3 ] + mag[ 5 ] - mag[ 6 ] + mag[ 8 ]) / 3.0f;
+    const auto gy  = (mag[ 6 ] + mag[ 7 ] + mag[ 8 ] - mag[ 0 ] - mag[ 1 ] - mag[ 2 ]) / 3.0f;
+    const auto gxx = (mag[ 0 ] - 2.0f * mag[ 1 ] + mag[ 2 ] + mag[ 3 ] - 2.0f * mag[ 4 ] +
+                      mag[ 5 ] + mag[ 6 ] - 2.0f * mag[ 7 ] + mag[ 8 ]) /
+                     6.0f;
+    const auto gxy = (-mag[ 0 ] + mag[ 2 ] + mag[ 6 ] - mag[ 8 ]) / 2.0f;
+    const auto gyy = (mag[ 0 ] + mag[ 1 ] + mag[ 2 ] - 2.0f * (mag[ 3 ] + mag[ 4 ] + mag[ 5 ]) +
+                      mag[ 6 ] + mag[ 7 ] + mag[ 8 ]) /
+                     6.0f;
 
     cv::Mat hessian(2, 2, CV_32FC1);
     hessian.at<float>(0, 0) = gxx;
@@ -618,11 +619,11 @@ cv::Point2f computeSubpixel(const cv::Mat &score) {
         ny = eigenvector.at<float>(1, 1);
     }
 
-    auto denominator = gxx * nx * nx + 2 * gxy * nx * ny + gyy * ny * ny;
+    const auto denominator = gxx * nx * nx + 2 * gxy * nx * ny + gyy * ny * ny;
     if (denominator != 0.0) {
-        auto t   = -(gx * nx + gy * ny) / denominator;
-        result.x = t * nx;
-        result.y = t * ny;
+        const auto t = -(gx * nx + gy * ny) / denominator;
+        result.x     = t * nx;
+        result.y     = t * ny;
     }
 
     return result;
@@ -801,8 +802,9 @@ Model_t trainModel(const unsigned char *data, int width, int height, int channel
         return nullptr;
     }
 
-    auto    type = channels == 1 ? CV_8UC1 : (channels == 3 ? CV_8UC3 : CV_8UC4);
-    cv::Mat img(cv::Size(width, height), type, const_cast<unsigned char *>(data), bytesPerLine);
+    const auto    type = channels == 1 ? CV_8UC1 : channels == 3 ? CV_8UC3 : CV_8UC4;
+    const cv::Mat img(cv::Size(width, height), type, const_cast<unsigned char *>(data),
+                      bytesPerLine);
 
     cv::Mat src;
     if (1 == channels) {
@@ -811,9 +813,9 @@ Model_t trainModel(const unsigned char *data, int width, int height, int channel
         cv::cvtColor(img, src, channels == 3 ? cv::COLOR_RGB2GRAY : cv::COLOR_RGBA2GRAY);
     }
 
-    cv::Rect rect(roiLeft, roiTop, roiWidth, roiHeight);
-    cv::Rect imageRect(0, 0, width, height);
-    auto     roi = rect & imageRect;
+    const cv::Rect rect(roiLeft, roiTop, roiWidth, roiHeight);
+    const cv::Rect imageRect(0, 0, width, height);
+    const auto     roi = rect & imageRect;
     if (roi.empty()) {
         return nullptr;
     }
@@ -822,7 +824,7 @@ Model_t trainModel(const unsigned char *data, int width, int height, int channel
 }
 
 void matchModel(const unsigned char *data, int width, int height, int channels, int bytesPerLine,
-                int roiLeft, int roiTop, int roiWidth, int roiHeight, const Model_t model,
+                int roiLeft, int roiTop, int roiWidth, int roiHeight, Model *const model,
                 int *count, Pose *poses, int level, double startAngle, double spanAngle,
                 double maxOverlap, double minScore, int subpixel) {
     if (nullptr == count) {
@@ -839,8 +841,9 @@ void matchModel(const unsigned char *data, int width, int height, int channels, 
         return;
     }
 
-    auto    type = channels == 1 ? CV_8UC1 : (channels == 3 ? CV_8UC3 : CV_8UC4);
-    cv::Mat img(cv::Size(width, height), type, const_cast<unsigned char *>(data), bytesPerLine);
+    const auto    type = channels == 1 ? CV_8UC1 : channels == 3 ? CV_8UC3 : CV_8UC4;
+    const cv::Mat img(cv::Size(width, height), type, const_cast<unsigned char *>(data),
+                      bytesPerLine);
 
     cv::Mat dst;
     if (1 == channels) {
@@ -849,18 +852,18 @@ void matchModel(const unsigned char *data, int width, int height, int channels, 
         cv::cvtColor(img, dst, channels == 3 ? cv::COLOR_RGB2GRAY : cv::COLOR_RGBA2GRAY);
     }
 
-    cv::Rect rect(roiLeft, roiTop, roiWidth, roiHeight);
-    cv::Rect imageRect(0, 0, width, height);
-    auto     roi = rect & imageRect;
+    const cv::Rect rect(roiLeft, roiTop, roiWidth, roiHeight);
+    const cv::Rect imageRect(0, 0, width, height);
+    const auto     roi = rect & imageRect;
     if (roi.empty()) {
         *count = 0;
         return;
     }
 
-    auto result = matchModel(dst(roi), model, level, startAngle, spanAngle, maxOverlap, minScore,
-                             *count, subpixel);
+    const auto result = matchModel(dst(roi), model, level, startAngle, spanAngle, maxOverlap,
+                                   minScore, *count, subpixel);
 
-    auto size = std::min(*count, static_cast<int>(result.size()));
+    const auto size = std::min(*count, static_cast<int>(result.size()));
     for (int i = 0; i < size; i++) {
         const auto &pose = result[ i ];
         poses[ i ]       = {pose.x + static_cast<float>(roi.x), pose.y + static_cast<float>(roi.y),
@@ -879,7 +882,7 @@ void freeModel(Model_t *model) {
     *model = nullptr;
 }
 
-int modelLevel(const Model_t model) {
+int modelLevel(Model *const model) {
     if (nullptr == model) {
         return 0;
     }
@@ -887,7 +890,7 @@ int modelLevel(const Model_t model) {
     return static_cast<int>(model->pyramids.size());
 }
 
-void modelImage(const Model_t model, int level, unsigned char *data, int length, int *width,
+void modelImage(Model *const model, int level, unsigned char *data, int length, int *width,
                 int *height, int *channels) {
     if (nullptr == model) {
         return;

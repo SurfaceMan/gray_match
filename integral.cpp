@@ -8,7 +8,8 @@ inline void expand(const cv::v_int32 &src, cv::v_float64 &low, cv::v_float64 &hi
     high = cv::v_cvt_f64_high(src);
 }
 
-inline void integralSum(const cv::v_uint16 &src, double *dst, double *prevDst, cv::v_uint32 &pre) {
+inline void integralSum(const cv::v_uint16 &src, double *dst, const double *prevDst,
+                        cv::v_uint32 &pre) {
     auto sum = cv::v_add(src, cv::v_rotate_left<1>(src));
     sum      = cv::v_add(sum, cv::v_rotate_left<2>(sum));
     sum      = cv::v_add(sum, cv::v_rotate_left<4>(sum));
@@ -100,8 +101,8 @@ pre);
 }
 */
 
-inline void integralSum(cv::v_uint16 &v1, cv::v_uint16 &v2, double *dst, double *prevDst,
-                        cv::v_uint32 &pre) {
+inline void integralSum(const cv::v_uint16 &v1, const cv::v_uint16 &v2, double *dst,
+                        const double *prevDst, cv::v_uint32 &pre) {
     integralSum(v1, dst, prevDst, pre);
     integralSum(v2, dst + simdSize(cv::v_uint16), prevDst + simdSize(cv::v_uint16), pre);
 }
@@ -124,20 +125,19 @@ void integralSimd(const cv::Mat &src, cv::Mat &sum, cv::Mat &sqSum) {
 
     const auto *srcStart   = src.data;
     const auto  srcStep    = src.step[ 0 ];
-    auto       *sumStart   = (double *)sum.data + sum.step1() + 1;
+    auto       *sumStart   = reinterpret_cast<double *>(sum.data) + sum.step1() + 1;
     const auto  sumStep    = sum.step[ 0 ] / sum.step[ 1 ];
-    auto       *sqSumStart = (double *)sqSum.data + sqSum.step1() + 1;
+    auto       *sqSumStart = reinterpret_cast<double *>(sqSum.data) + sqSum.step1() + 1;
     const auto  sqSumStep  = sqSum.step[ 0 ] / sqSum.step[ 1 ];
     const auto  end        = size.width - simdSize(cv::v_uint8);
     for (int y = 0; y < src.rows; y++) {
-        auto *srcPtr    = srcStart + srcStep * y;
-        auto *sumPtr    = sumStart + sumStep * y;
-        auto *preSumPtr = sumStart + sumStep * (y - 1);
-        sumPtr[ -1 ]    = 0;
+        auto       *srcPtr    = srcStart + srcStep * y;
+        auto       *sumPtr    = sumStart + sumStep * y;
+        const auto *preSumPtr = sumStart + sumStep * (y - 1);
+        sumPtr[ -1 ]          = 0;
 
         cv::v_uint32 prevSum = cv::vx_setzero_u32();
-        int          x       = 0;
-        for (; x < end; x += simdSize(cv::v_uint8)) {
+        for (int x = 0; x < end; x += simdSize(cv::v_uint8)) {
             cv::v_uint16 v1;
             cv::v_uint16 v2;
             cv::v_expand(cv::v_load(srcPtr + x), v1, v2);
@@ -153,8 +153,7 @@ void integralSimd(const cv::Mat &src, cv::Mat &sum, cv::Mat &sqSum) {
         sqSumPtr[ -1 ]    = 0;
 
         cv::v_uint32 prevSqSum = cv::vx_setzero_u32();
-        int          x         = 0;
-        for (; x < end; x += simdSize(cv::v_uint8)) {
+        for (int x = 0; x < end; x += simdSize(cv::v_uint8)) {
             cv::v_uint16 v1;
             cv::v_uint16 v2;
             cv::v_expand(cv::v_load(srcPtr + x), v1, v2);
@@ -165,14 +164,14 @@ void integralSimd(const cv::Mat &src, cv::Mat &sum, cv::Mat &sqSum) {
 
     const auto start = src.cols - src.cols % simdSize(cv::v_uint8);
     for (int y = 0; y < src.rows; y++) {
-        auto *srcPtr      = srcStart + srcStep * y;
-        auto *sumPtr      = sumStart + sumStep * y;
-        auto *sqSumPtr    = sqSumStart + sqSumStep * y;
-        auto *preSumPtr   = sumStart + sumStep * (y - 1);
-        auto *preSqSumPtr = sqSumStart + sqSumStep * (y - 1);
+        auto       *srcPtr      = srcStart + srcStep * y;
+        auto       *sumPtr      = sumStart + sumStep * y;
+        auto       *sqSumPtr    = sqSumStart + sqSumStep * y;
+        const auto *preSumPtr   = sumStart + sumStep * (y - 1);
+        const auto *preSqSumPtr = sqSumStart + sqSumStep * (y - 1);
         for (int x = start; x < src.cols; x++) {
-            auto val   = srcPtr[ x ];
-            auto sqVal = val * val;
+            const auto val   = srcPtr[ x ];
+            const auto sqVal = val * val;
 
             sumPtr[ x ]   = sumPtr[ x - 1 ] + val + preSumPtr[ x ] - preSumPtr[ x - 1 ];
             sqSumPtr[ x ] = sqSumPtr[ x - 1 ] + sqVal + preSqSumPtr[ x ] - preSqSumPtr[ x - 1 ];
