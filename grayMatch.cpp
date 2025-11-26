@@ -24,11 +24,10 @@ struct BlockMax {
             , maxPos(maxPos_)
             , maxScore(maxScore_) {}
 
-        Block(Block &&rhs) noexcept {
-            maxScore = rhs.maxScore;
-            maxPos   = rhs.maxPos;
-            maxScore = rhs.maxScore;
-        }
+        Block(Block &&rhs) noexcept
+            : rect(rhs.rect)
+            , maxPos(rhs.maxPos)
+            , maxScore(rhs.maxScore) {}
 
         bool operator<(const Block &rhs) const {
             return this->maxScore > rhs.maxScore;
@@ -38,9 +37,8 @@ struct BlockMax {
     std::vector<Block> blocks;
     cv::Mat            score;
 
-    BlockMax(cv::Mat score_, cv::Size templateSize) {
-        score = std::move(score_);
-
+    BlockMax(cv::Mat score_, cv::Size templateSize)
+        : score(std::move(score_)) {
         // divide source image to blocks then compute max
         auto blockWidth  = templateSize.width * 2;
         auto blockHeight = templateSize.height * 2;
