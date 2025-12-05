@@ -7,7 +7,7 @@
  2. refactor simd match process with opencv [Universal intrinsics](https://docs.opencv.org/4.x/df/d91/group__core__hal__intrin.html), have be tested on x86_64(sse),arm(neon),LoongArch(lsx).
  3. support model save/load as binary file
  4. provide pure c interface
- 5. support openmp
+ 5. support openmp with -DENABLE_OPENMP=ON. MSVC not support
  6. position with 3x3 subpixel interpolation
  
 ## usage:
